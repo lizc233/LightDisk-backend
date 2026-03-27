@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.star.mapper.VipConfigMapper">
+
+    <resultMap id="BaseResultMap" type="com.star.entity.VipConfig">
+            <id property="level" column="level" />
+            <result property="levelName" column="level_name" />
+            <result property="maxSpace" column="max_space" />
+            <result property="maxBatchUpload" column="max_batch_upload" />
+            <result property="downloadSpeedLimit" column="download_speed_limit" />
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        level,level_name,max_space,max_batch_upload,download_speed_limit
+    </sql>
+</mapper>

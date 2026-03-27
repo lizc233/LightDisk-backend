@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.star.mapper.StorageFileMapper">
+
+    <resultMap id="BaseResultMap" type="com.star.entity.StorageFile">
+            <id property="id" column="id" />
+            <result property="fileMd5" column="file_md5" />
+            <result property="realPath" column="real_path" />
+            <result property="fileSize" column="file_size" />
+            <result property="fileType" column="file_type" />
+            <result property="refCount" column="ref_count" />
+            <result property="createdAt" column="created_at" />
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        id,file_md5,real_path,file_size,file_type,ref_count,
+        created_at
+    </sql>
+</mapper>

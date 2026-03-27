@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.star.mapper.ShareMapper">
+
+    <resultMap id="BaseResultMap" type="com.star.entity.Share">
+            <id property="id" column="id" />
+            <result property="shareCode" column="share_code" />
+            <result property="itemType" column="item_type" />
+            <result property="itemId" column="item_id" />
+            <result property="userId" column="user_id" />
+            <result property="extractCode" column="extract_code" />
+            <result property="visitCount" column="visit_count" />
+            <result property="expireTime" column="expire_time" />
+            <result property="status" column="status" />
+            <result property="deleteTime" column="delete_time" />
+            <result property="createdAt" column="created_at" />
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        id,share_code,item_type,item_id,user_id,extract_code,
+        visit_count,expire_time,status,delete_time,created_at
+    </sql>
+</mapper>
