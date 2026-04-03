@@ -7,6 +7,11 @@ const routes = [
     path: '/disk',
     component: () => import('@/views/Disk.vue'),
     meta: { requiresAuth: true }
+  },
+  {
+    path: '/recycle',
+    name: 'Recycle',
+    component: () => import('@/views/recycle/index.vue')
   }
 ]
 

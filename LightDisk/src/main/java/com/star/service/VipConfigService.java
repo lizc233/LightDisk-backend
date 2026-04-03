@@ -1,6 +1,6 @@
 package com.star.service;
 
-import com.star.entity.VipConfig;
+import com.star.model.entity.VipConfig;
 import com.baomidou.mybatisplus.extension.service.IService;
 
 /**

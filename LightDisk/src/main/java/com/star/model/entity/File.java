@@ -1,9 +1,10 @@
-package com.star.entity;
+package com.star.model.entity;
 
 import com.baomidou.mybatisplus.annotation.IdType;
-import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+
+import java.time.LocalDateTime;
 import java.util.Date;
 import lombok.Data;
 
@@ -53,12 +54,12 @@ public class File {
     /**
      * 进入回收站的时间
      */
-    private Date deleteTime;
+    private LocalDateTime deleteTime;
 
     /**
      * 
      */
-    private Date createdAt;
+    private LocalDateTime createdAt;
 
     /**
      * 

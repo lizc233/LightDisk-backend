@@ -4,7 +4,7 @@
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.star.mapper.FileMapper">
 
-    <resultMap id="BaseResultMap" type="com.star.entity.File">
+    <resultMap id="BaseResultMap" type="com.star.model.entity.File">
             <id property="id" column="id" />
             <result property="fileName" column="file_name" />
             <result property="storageId" column="storage_id" />
@@ -17,8 +17,34 @@
             <result property="updatedAt" column="updated_at" />
     </resultMap>
 
-    <sql id="Base_Column_List">
-        id,file_name,storage_id,user_id,folder_id,download_count,
-        status,delete_time,created_at,updated_at
-    </sql>
+
+
+    <update id="deleteRecycleStatus">
+        UPDATE file SET status = 0 , delete_time = NOW()
+        WHERE id IN
+        <foreach item="item" index="index" collection="fileIds"
+                 open="(" separator="," close=")">
+            #{item}
+        </foreach>
+        AND user_id = #{userId}
+    </update>
+    <update id="restoreFile">
+        UPDATE file SET status = 1 , delete_time = NULL
+        WHERE id IN
+        <foreach item="item" index="index" collection="fileIds"
+        open="(" separator="," close=")">
+            #{item}
+        </foreach>
+        AND user_id = #{userId}
+    </update>
+    <delete id="deleteFile">
+        DELETE FROM file
+        WHERE id IN
+        <foreach item="item" index="index" collection="fileIds"
+        open="(" separator="," close=")">
+            #{item}
+        </foreach>
+        AND user_id = #{userId}
+    </delete>
+
 </mapper>

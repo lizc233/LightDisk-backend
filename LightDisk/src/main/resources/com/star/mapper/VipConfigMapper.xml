@@ -4,7 +4,7 @@
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.star.mapper.VipConfigMapper">
 
-    <resultMap id="BaseResultMap" type="com.star.entity.VipConfig">
+    <resultMap id="BaseResultMap" type="com.star.model.entity.VipConfig">
             <id property="level" column="level" />
             <result property="levelName" column="level_name" />
             <result property="maxSpace" column="max_space" />

@@ -1,7 +1,7 @@
 package com.star.service.impl;
 
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
-import com.star.entity.OperationLog;
+import com.star.model.entity.OperationLog;
 import com.star.service.OperationLogService;
 import com.star.mapper.OperationLogMapper;
 import org.springframework.stereotype.Service;

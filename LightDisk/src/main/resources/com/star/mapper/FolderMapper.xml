@@ -4,7 +4,7 @@
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.star.mapper.FolderMapper">
 
-    <resultMap id="BaseResultMap" type="com.star.entity.Folder">
+    <resultMap id="BaseResultMap" type="com.star.model.entity.Folder">
             <id property="id" column="id" />
             <result property="folderName" column="folder_name" />
             <result property="parentId" column="parent_id" />
@@ -14,9 +14,32 @@
             <result property="isDeleted" column="is_deleted" />
             <result property="deleteTime" column="delete_time" />
     </resultMap>
+    <update id="trashFolder">
+        UPDATE folder
+        SET is_deleted = 1, delete_time = NOW()
+        WHERE id IN
+        <foreach item="item" collection="folderIds" open="(" separator="," close=")">
+            #{item}
+        </foreach>
+        AND user_id = #{userId}
+    </update>
+    <update id="restoreFolder">
+        UPDATE folder
+        SET is_deleted = 0, delete_time = NULL
+        WHERE id IN
+        <foreach item="item" collection="folderIds" open="(" separator="," close=")">
+            #{item}
+        </foreach>
+        AND user_id = #{userId}
+    </update>
+    <delete id="deleteFile">
+        DELETE FROM folder
+        WHERE id IN
+        <foreach item="item" collection="folderIds" open="(" separator="," close=")">
+            #{item}
+        </foreach>
+        AND user_id = #{userId}
+    </delete>
 
-    <sql id="Base_Column_List">
-        id,folder_name,parent_id,path,user_id,created_at,
-        is_deleted,delete_time
-    </sql>
+
 </mapper>

@@ -4,7 +4,7 @@
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.star.mapper.StorageFileMapper">
 
-    <resultMap id="BaseResultMap" type="com.star.entity.StorageFile">
+    <resultMap id="BaseResultMap" type="com.star.model.entity.StorageFile">
             <id property="id" column="id" />
             <result property="fileMd5" column="file_md5" />
             <result property="realPath" column="real_path" />

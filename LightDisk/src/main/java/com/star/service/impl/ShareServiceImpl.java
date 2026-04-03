@@ -1,7 +1,7 @@
 package com.star.service.impl;
 
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
-import com.star.entity.Share;
+import com.star.model.entity.Share;
 import com.star.service.ShareService;
 import com.star.mapper.ShareMapper;
 import org.springframework.stereotype.Service;

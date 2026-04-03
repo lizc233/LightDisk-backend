@@ -1,6 +1,6 @@
 package com.star.service;
 
-import com.star.entity.Share;
+import com.star.model.entity.Share;
 import com.baomidou.mybatisplus.extension.service.IService;
 
 /**

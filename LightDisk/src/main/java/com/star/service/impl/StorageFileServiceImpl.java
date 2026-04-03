@@ -1,7 +1,7 @@
 package com.star.service.impl;
 
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
-import com.star.entity.StorageFile;
+import com.star.model.entity.StorageFile;
 import com.star.service.StorageFileService;
 import com.star.mapper.StorageFileMapper;
 import org.springframework.stereotype.Service;

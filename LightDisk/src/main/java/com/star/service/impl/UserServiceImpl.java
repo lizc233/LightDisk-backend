@@ -1,7 +1,7 @@
 package com.star.service.impl;
 
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
-import com.star.entity.User;
+import com.star.model.entity.User;
 import com.star.service.UserService;
 import com.star.mapper.UserMapper;
 import org.springframework.stereotype.Service;

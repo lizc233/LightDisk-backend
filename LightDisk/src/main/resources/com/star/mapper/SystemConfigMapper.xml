@@ -4,7 +4,7 @@
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.star.mapper.SystemConfigMapper">
 
-    <resultMap id="BaseResultMap" type="com.star.entity.SystemConfig">
+    <resultMap id="BaseResultMap" type="com.star.model.entity.SystemConfig">
             <id property="id" column="id" />
             <result property="configKey" column="config_key" />
             <result property="configValue" column="config_value" />

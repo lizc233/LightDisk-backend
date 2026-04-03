@@ -1,7 +1,7 @@
 package com.star.service.impl;
 
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
-import com.star.entity.VipConfig;
+import com.star.model.entity.VipConfig;
 import com.star.service.VipConfigService;
 import com.star.mapper.VipConfigMapper;
 import org.springframework.stereotype.Service;

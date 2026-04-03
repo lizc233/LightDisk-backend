@@ -1,7 +1,7 @@
 package com.star.service.impl;
 
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
-import com.star.entity.SystemConfig;
+import com.star.model.entity.SystemConfig;
 import com.star.service.SystemConfigService;
 import com.star.mapper.SystemConfigMapper;
 import org.springframework.stereotype.Service;

@@ -1,6 +1,6 @@
 package com.star.service;
 
-import com.star.entity.File;
+import com.star.model.entity.File;
 import com.baomidou.mybatisplus.extension.service.IService;
 
 /**

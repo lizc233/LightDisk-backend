@@ -1,6 +1,6 @@
 package com.star.service;
 
-import com.star.entity.OperationLog;
+import com.star.model.entity.OperationLog;
 import com.baomidou.mybatisplus.extension.service.IService;
 
 /**

@@ -4,7 +4,7 @@
         "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
 <mapper namespace="com.star.mapper.ShareMapper">
 
-    <resultMap id="BaseResultMap" type="com.star.entity.Share">
+    <resultMap id="BaseResultMap" type="com.star.model.entity.Share">
             <id property="id" column="id" />
             <result property="shareCode" column="share_code" />
             <result property="itemType" column="item_type" />
