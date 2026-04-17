@@ -1,19 +1,15 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import BasicLayout from '../layouts/BasicLayout.vue'
-import { ref, reactive } from 'vue'
-import axios from 'axios'
-import { ElMessage } from 'element-plus'
-
-
-const shareDialogVisible = ref(false)
-const sharing = ref(false)
-const currentFile = ref(null) // 当前选中的文件行
-const shareResult = ref(null) // 存储后端返回的分享信息
 
 const routes = [
   {
-    path: '/',
-    redirect: '/disk'
+    path: '/', // 根路径，对应浏览器直接访问 http://localhost:5173/
+    name: 'Landing',
+    component: () => import('@/views/Landing.vue'),
+    meta: {
+      requiresAuth: false, // 首页不需要鉴权
+      layout: 'empty' // 或者别的，只要不使用 BasicLayout 即可
+    }
   },
   {
     path: '/login',
@@ -21,13 +17,12 @@ const routes = [
     component: () => import('@/views/Login.vue')
   },
   {
-    path: '/',
+    path: '/app', // 网盘系统入口
     component: BasicLayout,
-    // 将权限校验加在父组件上，这样它所有的 children 都需要登录才能访问
-    meta: { requiresAuth: true },
+    meta: { requiresAuth: true }, // 需要登录
     children: [
       {
-        path: 'disk',
+        path: 'disk',  // 访问路径是 http://localhost:5173/app/disk
         name: 'Disk',
         component: () => import('@/views/Disk.vue')
       },
@@ -55,53 +50,10 @@ const router = createRouter({
   routes,
 })
 
-const shareForm = reactive({
-  expireType: 1 // 默认为7天
-})
-
-// --- 打开分享弹窗 ---
-const handleShare = (row) => {
-  currentFile.value = row
-  shareResult.value = null // 重置结果
-  shareDialogVisible.value = true
-}
-
-// --- 调用后端接口创建链接 ---
-const createShareLink = async () => {
-  if (!currentFile.value) return
-
-  sharing.value = true
-  try {
-    const res = await axios.post('http://localhost:8080/share/create', {
-      fileId: currentFile.value.id,
-      expireType: shareForm.expireType
-    })
-
-    // 假设后端返回的数据结构为 { shareUrl: '...', extractCode: '...' }
-    shareResult.value = res.data
-    ElMessage.success('链接创建成功')
-  } catch (error) {
-    ElMessage.error('创建分享失败，请检查网络或后端状态')
-    console.error(error)
-  } finally {
-    sharing.value = false
-  }
-}
-
-// --- 一键复制功能 ---
-const copyText = (text) => {
-  navigator.clipboard.writeText(text).then(() => {
-    ElMessage.success('已复制到剪贴板')
-  }).catch(() => {
-    ElMessage.error('复制失败，请手动选择复制')
-  })
-}
-
-// 保留你写好的路由守卫！
+// 全局路由守卫
 router.beforeEach((to, from, next) => {
   const token = localStorage.getItem('token')
 
-  // 使用 to.matched.some 可以确保即使访问子路由，也能识别到父路由上的 requiresAuth
   if (to.matched.some(record => record.meta.requiresAuth) && !token) {
     // 没登录，踢回登录页
     next('/login')

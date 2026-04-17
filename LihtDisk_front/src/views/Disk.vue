@@ -1,67 +1,115 @@
 <template>
-  <div class="disk-container">
-    <div class="operation-bar">
-      <el-button type="primary">上传文件</el-button>
-      <el-button>新建文件夹</el-button>
+  <div class="dropbox-container">
+    <div class="sub-sidebar">
+      <div class="sidebar-header">
+        <h2 class="title">所有文件</h2>
+      </div>
+      <nav class="nav-group">
+        <div class="nav-item active">
+          <el-icon><Folder /></el-icon> <span>全部文件</span>
+        </div>
+      </nav>
+
+      <div class="nav-divider"></div>
+
+      <div class="nav-section">
+        <h3 class="nav-label">快速筛选</h3>
+        <nav class="nav-group">
+          <div class="nav-item"><el-icon><Document /></el-icon> <span>PDF 文档</span></div>
+          <div class="nav-item"><el-icon><VideoCamera /></el-icon> <span>视频文件</span></div>
+          <div class="nav-item"><el-icon><Picture /></el-icon> <span>图片素材</span></div>
+        </nav>
+      </div>
     </div>
 
-    <el-table :data="tableData" style="width: 100%; margin-top: 20px;">
-      <el-table-column prop="name" label="文件名" />
-      <el-table-column prop="size" label="大小" width="180" />
-      <el-table-column prop="date" label="修改时间" width="180" />
-      <el-table-column label="操作" width="200">
-        <template #default="scope">
-          <el-button link type="primary" @click="handleShare(scope.row)">分享</el-button>
-          <el-button link type="danger">删除</el-button>
-        </template>
-      </el-table-column>
-    </el-table>
+    <div class="main-content">
+      <header class="content-header">
+        <el-input
+            v-model="searchQuery"
+            placeholder="搜索文件、文件夹..."
+            class="search-input"
+            :prefix-icon="Search"
+            clearable
+        />
+      </header>
+
+      <div class="action-grid">
+        <div class="action-tile dark">
+          <el-icon><Plus /></el-icon>
+          <span>创建</span>
+        </div>
+        <div class="action-tile light">
+          <el-icon><Upload /></el-icon>
+          <span>上传</span>
+        </div>
+        <div class="action-tile light">
+          <el-icon><FolderAdd /></el-icon>
+          <span>新建文件夹</span>
+        </div>
+      </div>
+
+      <div class="filter-pills">
+        <span class="pill active">最近使用</span>
+        <span class="pill">PDF</span>
+        <span class="pill">视频</span>
+        <span class="pill">文档</span>
+      </div>
+
+      <div class="file-list-wrapper">
+        <el-table :data="tableData" class="custom-table" @row-click="handleRowClick">
+          <el-table-column label="名称" min-width="300">
+            <template #default="scope">
+              <div class="file-info-cell">
+                <el-icon class="file-icon" :class="scope.row.type"><Document /></el-icon>
+                <span class="file-name">{{ scope.row.name }}</span>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column prop="date" label="修改时间" width="180" />
+          <el-table-column label="" width="120" align="right">
+            <template #default="scope">
+              <div class="row-actions">
+                <el-button link type="primary" @click.stop="handleShare(scope.row)">分享</el-button>
+                <el-button link :icon="MoreFilled" />
+              </div>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
+    </div>
 
     <el-dialog
         v-model="shareDialogVisible"
         title="分享文件"
-        width="400px"
-        class="share-dialog-glass"
-        :append-to-body="true"
+        width="420px"
+        class="custom-dialog"
         destroy-on-close
     >
-      <div v-if="!shareResult" class="share-setup">
-        <p class="share-label">设置链接有效期</p>
-        <el-radio-group v-model="shareForm.expireType" class="expiry-group">
-          <el-radio-button :label="0">永久有效</el-radio-button>
+      <div v-if="!shareResult" class="share-box">
+        <p class="share-desc">链接有效期</p>
+        <el-radio-group v-model="shareForm.expireType" class="modern-radio">
+          <el-radio-button :label="0">永久</el-radio-button>
           <el-radio-button :label="1">7天</el-radio-button>
           <el-radio-button :label="2">30天</el-radio-button>
         </el-radio-group>
       </div>
-
-      <div v-else class="share-result">
-        <el-alert title="分享链接已生成" type="success" :closable="false" show-icon />
-        <div class="result-item" style="margin-top: 15px;">
-          <span class="item-label" style="display:block; margin-bottom: 5px; color: #606266; font-size: 13px;">分享链接</span>
-          <el-input v-model="shareResult.shareUrl" readonly>
-            <template #append>
-              <el-button @click="copyText(shareResult.shareUrl)">复制</el-button>
-            </template>
-          </el-input>
-        </div>
-        <div class="result-item" style="margin-top: 15px;">
-          <span class="item-label" style="display:block; margin-bottom: 5px; color: #606266; font-size: 13px;">提取码</span>
-          <el-input v-model="shareResult.extractCode" readonly style="width: 120px" />
-        </div>
+      <div v-else class="share-success">
+        <el-result icon="success" title="分享链接已就绪">
+          <template #extra>
+            <div class="copy-field">
+              <el-input v-model="shareResult.shareUrl" readonly>
+                <template #append>
+                  <el-button @click="copyText(shareResult.shareUrl)">复制链接</el-button>
+                </template>
+              </el-input>
+            </div>
+          </template>
+        </el-result>
       </div>
-
       <template #footer>
         <div class="dialog-footer">
-          <el-button @click="shareDialogVisible = false">取消</el-button>
-          <el-button
-              type="primary"
-              :loading="sharing"
-              @click="createShareLink"
-              v-if="!shareResult"
-          >
-            创建链接
-          </el-button>
-          <el-button type="primary" @click="shareDialogVisible = false" v-else>完成</el-button>
+          <el-button @click="shareDialogVisible = false">关闭</el-button>
+          <el-button v-if="!shareResult" type="primary" :loading="sharing" @click="createShareLink">创建分享</el-button>
         </div>
       </template>
     </el-dialog>
@@ -72,86 +120,96 @@
 import { ref, reactive } from 'vue'
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
+import { Folder, Document, VideoCamera, Picture, Search, Plus, Upload, FolderAdd, MoreFilled } from '@element-plus/icons-vue'
 
-// --- 伪造几条测试文件数据，注意第一条的 id 是 888，对应你后端的假数据 ---
+const searchQuery = ref('')
 const tableData = ref([
-  { id: 888, name: '测试机密文件.pdf', size: '2.4 MB', date: '2026-04-17' },
-  { id: 889, name: '项目架构图.png', size: '1.1 MB', date: '2026-04-16' }
+  { id: 888, name: '毕业论文最终稿.pdf', type: 'pdf', date: '2026-04-17 10:00' },
+  { id: 889, name: '项目演示视频.mp4', type: 'video', date: '2026-04-16 15:30' },
+  { id: 890, name: '代码架构图.png', type: 'img', date: '2026-04-15 09:20' }
 ])
 
-// 控制弹窗显示/隐藏
+// 分享逻辑
 const shareDialogVisible = ref(false)
-// 控制按钮的 loading 圈圈
 const sharing = ref(false)
-// 记录当前点击的是哪一行文件
 const currentFile = ref(null)
-// 存储后端返回的链接和提取码
 const shareResult = ref(null)
+const shareForm = reactive({ expireType: 1 })
 
-// 弹窗表单数据
-const shareForm = reactive({
-  expireType: 1 // 默认选中 7天
-})
-
-// 点击列表里的【分享】按钮时触发
 const handleShare = (row) => {
-  currentFile.value = row // 把当前这行的文件数据存下来
-  shareResult.value = null // 清空上一次的生成结果
-  shareDialogVisible.value = true // 弹出对话框
+  currentFile.value = row
+  shareResult.value = null
+  shareDialogVisible.value = true
 }
 
-// 点击弹窗里的【创建链接】按钮时触发
 const createShareLink = async () => {
-  if (!currentFile.value) return
-
   sharing.value = true
   try {
-    // 发送 POST 请求给你写的 Spring Boot 后端
     const res = await axios.post('http://localhost:8080/share/create', {
       fileId: currentFile.value.id,
       expireType: shareForm.expireType
     })
-
-    // 把后端返回的数据赋给 shareResult，页面会自动切换到成功视图
     shareResult.value = res.data
-    ElMessage.success('链接创建成功')
-  } catch (error) {
-    ElMessage.error('创建分享失败，请检查网络或后端状态')
-    console.error(error)
+    ElMessage.success('分享成功')
+  } catch (e) {
+    ElMessage.error('创建失败，请检查后端')
   } finally {
     sharing.value = false
   }
 }
 
-// 复制文本功能
 const copyText = (text) => {
-  navigator.clipboard.writeText(text).then(() => {
-    ElMessage.success('已复制到剪贴板')
-  }).catch(() => {
-    ElMessage.error('复制失败，请手动选择复制')
-  })
+  navigator.clipboard.writeText(text).then(() => ElMessage.success('已复制'))
 }
 </script>
 
 <style scoped>
-/* 稍微加点边距让页面好看点 */
-.disk-container {
-  padding: 10px;
-}
+.dropbox-container { display: flex; height: 100%; background: #fff; }
 
-.operation-bar {
-  display: flex;
-  gap: 10px;
+/* 侧边栏样式 */
+.sub-sidebar { width: 240px; background: #f7f9fa; border-right: 1px solid #e6e9eb; padding: 32px 16px; }
+.title { font-size: 20px; font-weight: 700; margin-bottom: 24px; padding-left: 12px; }
+.nav-label { font-size: 12px; color: #637282; margin: 24px 0 12px 12px; text-transform: uppercase; }
+.nav-item {
+  display: flex; align-items: center; gap: 12px; padding: 10px 12px;
+  border-radius: 8px; cursor: pointer; color: #1e1919; transition: all 0.2s;
 }
+.nav-item:hover { background: #e6e9eb; }
+.nav-item.active { background: #0061fe; color: #fff; }
+.nav-divider { height: 1px; background: #e6e9eb; margin: 20px 12px; }
 
-.share-setup {
-  text-align: center;
-  padding: 15px 0 25px 0;
+/* 主区域样式 */
+.main-content { flex: 1; padding: 32px 48px; overflow-y: auto; }
+.search-input { max-width: 560px; margin-bottom: 32px; }
+:deep(.search-input .el-input__wrapper) {
+  background: #f7f9fa; border-radius: 24px; box-shadow: none !important; border: 1px solid transparent;
 }
+:deep(.search-input .el-input__wrapper:hover) { border-color: #0061fe; }
 
-.share-label {
-  margin-bottom: 15px;
-  color: #303133;
-  font-weight: bold;
+/* 磁贴按键 */
+.action-grid { display: flex; gap: 16px; margin-bottom: 40px; }
+.action-tile {
+  width: 130px; height: 90px; border-radius: 12px; display: flex; flex-direction: column;
+  justify-content: center; align-items: flex-start; padding: 16px; cursor: pointer; transition: 0.2s;
 }
+.action-tile.dark { background: #1e1919; color: #fff; }
+.action-tile.light { border: 1px solid #e6e9eb; }
+.action-tile:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
+
+/* 胶囊过滤器 */
+.filter-pills { display: flex; gap: 8px; margin-bottom: 24px; }
+.pill {
+  padding: 6px 16px; border-radius: 20px; background: #f7f9fa; font-size: 14px;
+  cursor: pointer; transition: 0.2s; border: 1px solid transparent;
+}
+.pill:hover { background: #e6e9eb; }
+.pill.active { background: #1e1919; color: #fff; }
+
+/* 表格定制 */
+.file-info-cell { display: flex; align-items: center; gap: 12px; font-weight: 500; }
+.file-icon { font-size: 20px; }
+.pdf { color: #fa4b4b; }
+.video { color: #0061fe; }
+.img { color: #00a870; }
+.custom-table { --el-table-header-text-color: #637282; }
 </style>
