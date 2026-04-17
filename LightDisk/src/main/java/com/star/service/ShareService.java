@@ -1,7 +1,9 @@
 package com.star.service;
 
+import com.star.model.dto.ShareCreateDTO;
 import com.star.model.entity.Share;
 import com.baomidou.mybatisplus.extension.service.IService;
+import com.star.model.vo.ShareInfoVO;
 
 /**
 * @author Lizc233
@@ -10,4 +12,5 @@ import com.baomidou.mybatisplus.extension.service.IService;
 */
 public interface ShareService extends IService<Share> {
 
+    ShareInfoVO createShare(ShareCreateDTO dto, Long currentUserId);
 }

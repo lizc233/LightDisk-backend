@@ -2,6 +2,9 @@ server:
   port: 8080
 
 spring:
+  mvc:
+    pathmatch:
+      matching-strategy: ant_path_matcher
   profiles:
     active: dev # 激活开发环境
   main:
@@ -12,6 +15,17 @@ spring:
     url: jdbc:mysql://${star.datasource.host}:${star.datasource.port}/${star.datasource.database}?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=utf-8&useSSL=false
     username: ${star.datasource.username}
     password: ${star.datasource.password}
+  redis:
+    host: ${star.redis.host}
+    port: ${star.redis.port}
+    password:
+    database: 0
+    lettuce:
+      pool:
+        max-active: 8
+        max-idle: 8
+        max-wait: -1ms
+        min-idle: 0
 
 # MyBatis-Plus 配置 (适配你刚才生成的代码)
 mybatis-plus:
