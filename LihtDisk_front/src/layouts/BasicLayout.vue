@@ -11,19 +11,19 @@
           class="side-menu"
           router
       >
-        <el-menu-item index="/disk">
+        <el-menu-item index="/app/disk">
           <el-icon><Document /></el-icon>
           <span>全部文件</span>
         </el-menu-item>
-        <el-menu-item index="/share">
+        <el-menu-item index="/app/share">
           <el-icon><Share /></el-icon>
           <span>我的分享</span>
         </el-menu-item>
-        <el-menu-item index="/recycle">
+        <el-menu-item index="/app/recycle">
           <el-icon><Delete /></el-icon>
           <span>回收站</span>
         </el-menu-item>
-        <el-menu-item index="/admin">
+        <el-menu-item index="/app/admin">
           <el-icon><Setting /></el-icon>
           <span>后台管理</span>
         </el-menu-item>
