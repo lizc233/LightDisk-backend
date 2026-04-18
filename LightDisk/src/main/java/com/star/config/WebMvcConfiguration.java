@@ -1,7 +1,11 @@
 package com.star.config;
 
+import com.star.interceptor.JwtTokenInterceptor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
+import org.springframework.web.servlet.config.annotation.WebMvcConfigurationSupport;
 import springfox.documentation.builders.ApiInfoBuilder;
 import springfox.documentation.builders.PathSelectors;
 import springfox.documentation.builders.RequestHandlerSelectors;
@@ -12,8 +16,19 @@ import com.github.xiaoymin.knife4j.spring.annotations.EnableKnife4j;
 
 @Configuration
 @EnableKnife4j
-public class WebMvcConfiguration {
+public class WebMvcConfiguration extends WebMvcConfigurationSupport {
 
+    @Autowired
+    private JwtTokenInterceptor jwtTokenInterceptor;
+    protected void addInterceptors(InterceptorRegistry registry) {
+        registry.addInterceptor(jwtTokenInterceptor)
+                .addPathPatterns("/api/**") // 拦截所有业务接口
+                .excludePathPatterns(
+                        "/api/login",
+                        "/api/register"
+                        ); // 放行登录接口
+
+    }
     @Bean
     public Docket docket() {
         ApiInfo apiInfo = new ApiInfoBuilder()

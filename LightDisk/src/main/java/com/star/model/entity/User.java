@@ -59,12 +59,12 @@ public class User {
     /**
      * 
      */
-    private Date createdAt;
+    private LocalDateTime createdAt;
 
     /**
      * 
      */
-    private Date updatedAt;
+    private LocalDateTime updatedAt;
 
     @Override
     public boolean equals(Object that) {

@@ -80,9 +80,10 @@
             </svg>
             使用 Google 账号登录
           </button>
-          <p class="signup-tip">
-            还没有账号？ <span class="link-text">立即创建一个账号</span>
-          </p>
+          <div class="auth-footer">
+            <span class="tip-text">还没有账号？</span>
+            <el-link type="primary" underline="never" @click="router.push('/register')">立即注册</el-link>
+          </div>
         </div>
 
         <footer class="login-footer">
@@ -101,10 +102,15 @@
 
 <script setup>
 import {ref, reactive, onMounted, onUnmounted} from 'vue'
+import axios from 'axios'
 import {useRouter} from 'vue-router'
 import {ElMessage} from 'element-plus'
 
 const router = useRouter()
+const loginForm = reactive({
+  username: '',
+  password: ''
+})
 
 // --- 左侧抽象轮播逻辑 ---
 const bgImages = ref([
@@ -144,25 +150,52 @@ const rules = {
   password: [{required: true, message: '请输入密码', trigger: 'blur'}],
 }
 
+// Login.vue 中的 handleLogin 函数
 const handleLogin = async () => {
-  const valid = await formRef.value?.validate()
-  if (!valid) return
+  try {
+    // 建议先触发一次表单校验
+    await formRef.value.validate()
+    loading.value = true
 
-  loading.value = true
+    // 关键修复：使用 form 对象中的数据
+    const res = await axios.post('http://localhost:8080/api/login', {
+      username: form.username,
+      password: form.password
+    })
 
-  setTimeout(async () => {
-    localStorage.setItem('token', 'mock-token')
-    localStorage.setItem('userInfo', JSON.stringify({username: form.username, role: 0}))
-
-    ElMessage({message: '登录成功，欢迎回来', type: 'success', duration: 2000})
-
-    await router.push('/app/disk')
+    if (res.data.code === 1) {
+      const { token, id, username } = res.data.data
+      localStorage.setItem('token', token)
+      localStorage.setItem('userInfo', JSON.stringify({ id, username }))
+      ElMessage.success('欢迎回来，' + username)
+      router.push('/app/disk')
+    } else {
+      // 这里的字段名要根据你后端 Result 类的定义来，可能是 res.data.msg
+      const errorMsg = res.data.msg || res.data.message || '登录失败'
+      ElMessage.error(errorMsg)
+    }
+  } catch (error) {
+    console.error("登录异常:", error)
+    if (error.response && error.response.data) {
+      ElMessage.error(error.response.data.msg || '认证失败')
+    } else {
+      ElMessage.error('网络连接失败')
+    }
+  } finally {
     loading.value = false
-  }, 800)
+  }
 }
 </script>
 
 <style scoped>
+.auth-footer {
+  margin-top: 20px;
+  text-align: center;
+  font-size: 14px;
+}
+.tip-text {
+  color: #637282; /* 这种深灰色很符合你要求的 tech-focused 风格 */
+}
 /* ====== 顶级布局：原生 CSS Flexbox ====== */
 .login-viewport {
   width: 100vw;

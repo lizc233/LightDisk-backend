@@ -1,7 +1,10 @@
 package com.star.service;
 
+import com.star.model.dto.LoginDTO;
+import com.star.model.dto.RegisterDTO;
 import com.star.model.entity.User;
 import com.baomidou.mybatisplus.extension.service.IService;
+import com.star.model.vo.LoginVO;
 
 /**
 * @author Lizc233
@@ -10,4 +13,7 @@ import com.baomidou.mybatisplus.extension.service.IService;
 */
 public interface UserService extends IService<User> {
 
+    LoginVO login(LoginDTO loginDTO);
+
+    void register(RegisterDTO registerDTO);
 }

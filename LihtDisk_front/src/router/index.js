@@ -17,6 +17,11 @@ const routes = [
     component: () => import('@/views/Login.vue')
   },
   {
+    path: '/register',
+    // 确保这里的路径和你 Register.vue 的实际存放位置一致
+    component: () => import('../views/Register.vue')
+  },
+  {
     path: '/app', // 网盘系统入口
     component: BasicLayout,
     meta: { requiresAuth: true }, // 需要登录
