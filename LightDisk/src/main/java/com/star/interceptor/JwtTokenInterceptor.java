@@ -34,6 +34,10 @@ public class JwtTokenInterceptor implements HandlerInterceptor {
 
         // 2. 从请求头中获取令牌
         String token = request.getHeader("Authorization");
+        if (token == null || token.isEmpty()) {
+            token = request.getParameter("token"); // 🌟 允许从 URL 参数获取 token!
+        }
+        log.info("拦截器最终获取到的Token: [{}]", token);
 
         try {
             log.info("JWT校验: {}", token);

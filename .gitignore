@@ -19,3 +19,4 @@ temp/
 # 忽略本地开发的私密配置文件
 **/application-dev.yml
 **/.idea
+**/LightDisk_front

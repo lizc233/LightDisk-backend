@@ -16,7 +16,7 @@ import java.util.List;
 @Slf4j
 @Api(tags = "回收管理")
 @RestController
-@RequestMapping("/recycle")
+@RequestMapping("/api/file/recycle")
 public class RecycleController {
     @Autowired
     private RecycleService recycleService;

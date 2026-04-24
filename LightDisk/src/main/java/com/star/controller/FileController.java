@@ -1,7 +1,9 @@
 package com.star.controller;
 
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.star.common.Result;
 import com.star.context.BaseContext;
+import com.star.model.dto.FileQueryDTO;
 import com.star.model.vo.FileListVO;
 import com.star.service.IFileService;
 import com.star.utils.JwtUtils;
@@ -14,6 +16,7 @@ import org.springframework.web.multipart.MultipartFile;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import java.io.*;
+import java.nio.file.Files;
 import java.util.List;
 
 @Slf4j
@@ -44,6 +47,9 @@ public class FileController {
         Long userId = BaseContext.getCurrentId();
         String filePath = fileService.downloadFile(fileId, userId);
 
+        com.star.model.entity.File userFile = fileService.getById(fileId);
+        String realFileName = userFile.getFileName();
+
         java.io.File file = new java.io.File(filePath);
         if (!file.exists()) {
             response.setStatus(404);
@@ -54,8 +60,9 @@ public class FileController {
              OutputStream outputStream = response.getOutputStream()) {
 
             response.setContentType("application/octet-stream");
-            response.setHeader("Content-Disposition", "attachment; filename=\"" + file.getName() + "\"");
+            response.setHeader("Content-Disposition", "attachment; filename=\"" + java.net.URLEncoder.encode(realFileName, "UTF-8") + "\"");
             response.setContentLengthLong(file.length());
+
 
             byte[] buffer = new byte[8192];
             int bytesRead;
@@ -69,14 +76,12 @@ public class FileController {
         }
     }
 
-    @GetMapping("/list")
-    public Result<List<FileListVO>> list(
-            @RequestParam(value = "folderId", required = false, defaultValue = "0") Long folderId,
-            HttpServletRequest request) {
-
+    @PostMapping("/list") // 改用 Post 方便传复杂的 JSON，或者用 Get 配合 @ModelAttribute
+    public Result<Page<FileListVO>> list(@RequestBody FileQueryDTO queryDTO) {
         Long userId = BaseContext.getCurrentId();
-        List<FileListVO> list = fileService.getFileList(folderId, userId);
-        return Result.success(list);
+        // 因为涉及分页，建议返回 Mybatis-Plus 的 Page 对象或者自定义的分页 VO
+        Page<FileListVO> pageData = fileService.getFileListAdvanced(queryDTO, userId);
+        return Result.success(pageData);
     }
 
     @DeleteMapping("/{fileId}")
@@ -103,5 +108,47 @@ public class FileController {
         Long userId = BaseContext.getCurrentId();
         fileService.restoreFile(fileId, userId);
         return Result.success(null);
+    }
+
+    @GetMapping("/preview/{fileId}")
+    public void preview(@PathVariable Long fileId,
+                         HttpServletRequest request,
+                         HttpServletResponse response) {
+
+        Long userId = BaseContext.getCurrentId();
+        String filePath = fileService.downloadFile(fileId, userId);
+
+        com.star.model.entity.File userFile = fileService.getById(fileId);
+        String realFileName = userFile.getFileName();
+
+        java.io.File file = new java.io.File(filePath);
+        if (!file.exists()) {
+            response.setStatus(404);
+            return;
+        }
+
+        try (InputStream inputStream = new FileInputStream(file);
+             OutputStream outputStream = response.getOutputStream()) {
+
+            String contentType = request.getServletContext().getMimeType(realFileName);
+            if (contentType == null) {
+                contentType = "application/octet-stream"; // 兜底
+            }
+
+            response.setContentType(contentType);
+            response.setHeader("Content-Disposition", "inline; filename=\"" + java.net.URLEncoder.encode(realFileName, "UTF-8") + "\"");
+
+            response.setContentLengthLong(file.length());
+
+            byte[] buffer = new byte[8192];
+            int bytesRead;
+            while ((bytesRead = inputStream.read(buffer)) != -1) {
+                outputStream.write(buffer, 0, bytesRead);
+            }
+            outputStream.flush();
+
+        } catch (IOException e) {
+            log.error("文件下载失败", e);
+        }
     }
 }

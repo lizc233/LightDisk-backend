@@ -2,7 +2,9 @@ package com.star.service.impl;
 
 import cn.hutool.crypto.digest.DigestUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.star.model.dto.FileQueryDTO;
 import com.star.model.vo.FileListVO;
 import com.star.model.entity.File;
 import com.star.model.entity.Folder;
@@ -239,5 +241,94 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements IF
         userFile.setStatus(1);
         userFile.setDeleteTime(null);
         fileMapper.updateById(userFile);
+    }
+
+    @Override
+    public Page<FileListVO> getFileListAdvanced(FileQueryDTO query, Long userId) {
+        Page<File> pageParam = new Page<>(query.getPageNum(), query.getPageSize());
+        Page<FileListVO> resultPage = new Page<>(query.getPageNum(), query.getPageSize());
+
+        // 场景 A：全局搜索 (最近使用 或 特定分类) -> 忽略 folderId，只查文件，不查文件夹
+        if ((query.getIsRecent() != null && query.getIsRecent()) ||
+                (query.getCategory() != null && !query.getCategory().equals("all"))) {
+
+            LambdaQueryWrapper<File> fileWrapper = new LambdaQueryWrapper<>();
+            fileWrapper.eq(File::getUserId, userId)
+                    .eq(File::getStatus, 1);
+
+            // 1. 如果是“最近使用”，按更新/创建时间倒序
+            if (query.getIsRecent() != null && query.getIsRecent()) {
+                fileWrapper.orderByDesc(File::getCreatedAt); // 假设以创建时间作为最近依据
+            }
+
+            // 2. 如果指定了分类，通过文件后缀进行模糊匹配
+            if (query.getCategory() != null) {
+                switch (query.getCategory()) {
+                    case "image":
+                        fileWrapper.and(w -> w.like(File::getFileName, ".jpg").or().like(File::getFileName, ".png"));
+                        break;
+                    case "doc":
+                        fileWrapper.and(w -> w.like(File::getFileName, ".pdf").or().like(File::getFileName, ".doc"));
+                        break;
+                    case "video":
+                        fileWrapper.and(w -> w.like(File::getFileName, ".mp4"));
+                        break;
+                }
+            }
+
+            Page<File> filePage = fileMapper.selectPage(pageParam, fileWrapper);
+            List<FileListVO> voList = filePage.getRecords().stream().map(f -> {
+                FileListVO vo = new FileListVO();
+                vo.setId(f.getId());
+                vo.setName(f.getFileName());
+                vo.setType("file"); // 也可以进一步细分后缀
+                vo.setUpdateTime(f.getCreatedAt());
+                return vo;
+            }).collect(Collectors.toList());
+
+            resultPage.setRecords(voList);
+            resultPage.setTotal(filePage.getTotal());
+            return resultPage;
+        }
+
+        // 场景 B：常规的层级浏览 (根据 folderId 查询当前目录下的文件夹和文件)
+        // 这里的逻辑与你原来的类似，但要注意如果是常规浏览，其实不需要分页，或者要做假分页（组合文件夹和文件）
+        // 为了简化，常规浏览时可以直接查出所有，封装进第一页。
+        Long targetFolderId = query.getFolderId() != null ? query.getFolderId() : 0L;
+
+        List<Folder> folders = folderMapper.selectList(
+                new LambdaQueryWrapper<Folder>()
+                        .eq(Folder::getParentId, targetFolderId)
+                        .eq(Folder::getUserId, userId)
+                        .eq(Folder::getIsDeleted, 0)
+        );
+        List<File> files = fileMapper.selectList(
+                new LambdaQueryWrapper<File>()
+                        .eq(File::getFolderId, targetFolderId)
+                        .eq(File::getUserId, userId)
+                        .eq(File::getStatus, 1)
+        );
+
+        List<FileListVO> voList = folders.stream().map(f -> {
+            FileListVO vo = new FileListVO();
+            vo.setId(f.getId());
+            vo.setName(f.getFolderName());
+            vo.setType("folder");
+            vo.setUpdateTime(f.getCreatedAt());
+            return vo;
+        }).collect(Collectors.toList());
+
+        voList.addAll(files.stream().map(f -> {
+            FileListVO vo = new FileListVO();
+            vo.setId(f.getId());
+            vo.setName(f.getFileName());
+            vo.setType("file");
+            vo.setUpdateTime(f.getCreatedAt());
+            return vo;
+        }).collect(Collectors.toList()));
+
+        resultPage.setRecords(voList);
+        resultPage.setTotal(voList.size());
+        return resultPage;
     }
 }
