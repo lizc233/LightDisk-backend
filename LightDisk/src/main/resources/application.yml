@@ -42,3 +42,5 @@ logging:
         mapper: debug
         service: info
         controller: info
+file:
+  upload-dir: E:/lightdisk_data/uploads

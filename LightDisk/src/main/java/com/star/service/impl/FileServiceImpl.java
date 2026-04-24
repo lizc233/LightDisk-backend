@@ -27,6 +27,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -67,23 +68,30 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements IF
                     throw new BusinessException("服务器繁忙，请稍后重试");
                 }
             }
-            // ==========================================
-
-            String originalFilename = file.getOriginalFilename();
-            long fileSize = file.getSize();
-            String md5 = DigestUtil.md5Hex(file.getInputStream());
-
             User user = userMapper.selectById(userId);
             if (user == null) throw new BusinessException("用户不存在");
 
             VipConfig vipConfig = vipConfigMapper.selectById(user.getRole());
             if (vipConfig == null) throw new BusinessException("用户等级配置不存在");
-            if (user.getUsedSpace() + fileSize > vipConfig.getMaxSpace())
-                throw new BusinessException("存储空间不足");
 
+            long fileSize = file.getSize();
+            if (user.getUsedSpace() + fileSize > vipConfig.getMaxSpace()) {
+                throw new BusinessException("存储空间不足");
+            }
+            // 2. 【读取文件】校验通过后，再读流计算 MD5，并确保关闭流
+            String md5;
+            try (InputStream inputStream = file.getInputStream()) {
+                md5 = DigestUtil.md5Hex(inputStream);
+            } // 自动关闭 InputStream，释放 Windows 文件锁
+
+            String originalFilename = file.getOriginalFilename();
+
+            // 3. 继续执行你后面的秒传逻辑...
             StorageFile existingStorage = storageFileMapper.selectOne(
                     new LambdaQueryWrapper<StorageFile>().eq(StorageFile::getFileMd5, md5)
             );
+
+            // ==========================================
 
             Long storageId;
             boolean isSec = false;

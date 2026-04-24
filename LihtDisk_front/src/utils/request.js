@@ -23,7 +23,7 @@ request.interceptors.response.use(
   (response) => {
     // 统一处理业务状态码
     const res = response.data
-    if (res.code !== 200) {
+    if (res.code !== 200 && res.code !== 1) {
       ElMessage.error(res.msg || '请求失败')
       return Promise.reject(new Error(res.msg || 'Error'))
     }

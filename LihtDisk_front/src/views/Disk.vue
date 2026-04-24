@@ -77,6 +77,7 @@
             <template #default="scope">
               <div class="row-actions">
                 <el-button link type="primary" @click.stop="handleShare(scope.row)">分享</el-button>
+                <el-button link type="danger" @click.stop="handleDelete(scope.row)">删除</el-button>
                 <el-button link :icon="MoreFilled" />
               </div>
             </template>
@@ -124,58 +125,65 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue' // 新增了 onMounted 生命周期
-import axios from 'axios'
+import { ref, reactive, onMounted } from 'vue'
+// 【改动1】删除了原生的 axios，引入你封装好的 request.js
+import request from '@/utils/request'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Folder, Document, VideoCamera, Picture, Search, Plus, Upload, FolderAdd, MoreFilled, Delete } from '@element-plus/icons-vue'
 
 const searchQuery = ref('')
-const tableData = ref([]) // 1. 清空假数据，初始为空数组
-const currentFolderId = ref(0) // 记录当前所在的文件夹ID，默认0（根目录）
+const tableData = ref([])
+const currentFolderId = ref(0)
 
-// ========== 核心：获取本地存储的 Token ==========
-const getAuthHeaders = () => {
-  const token = localStorage.getItem('token')
-  return {
-    'Authorization': token ? `Bearer ${token}` : ''
-  }
-}
+// 【改动2】删除了冗余的 getAuthHeaders 方法，因为 request.js 已经自动处理了 Token
 
-// ========== 核心：从后端加载真实的文件列表 ==========
+// ========== 获取文件列表 ==========
+// ========== 获取文件列表 ==========
 const loadFileList = async () => {
   try {
-    const res = await axios.get('http://localhost:8080/api/file/list', {
-      params: { folderId: currentFolderId.value },
-      headers: getAuthHeaders() // 必须带上 Token！
+    const res = await request.get('/file/list', {
+      params: {
+        folderId: currentFolderId.value,
+        t: Date.now() // 加上时间戳防止浏览器缓存
+      }
     })
 
-    // 假设你后端的 Result 类成功时 code 为 200
-    if (res.data.code === 200) {
-      // 把后端返回的 FileListVO 映射到前端表格能读懂的格式
-      tableData.value = res.data.data.map(item => ({
+    // 因为 request.js 返回的是 response.data，所以这里直接用 res.data
+    tableData.value = res.data.map(item => {
+      // 🌟 新增：时间格式超级兼容处理
+      let timeStr = '未知时间'
+      if (item.updateTime) {
+        if (typeof item.updateTime === 'string') {
+          // 如果是标准 ISO 字符串
+          timeStr = item.updateTime.replace('T', ' ').substring(0, 19)
+        } else if (Array.isArray(item.updateTime)) {
+          // 如果是 Spring Boot 默认的 LocalDateTime 数组 [年, 月, 日, 时, 分, 秒]
+          const [y, m, d, h, min, s] = item.updateTime
+          timeStr = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')} ${String(h || 0).padStart(2, '0')}:${String(min || 0).padStart(2, '0')}`
+        } else {
+          // 如果是长整型时间戳
+          timeStr = new Date(item.updateTime).toLocaleString()
+        }
+      }
+
+      return {
         id: item.id,
         name: item.name,
-        type: item.type, // 后端返回的 'folder' 或 'file'
-        // 简单处理一下时间格式
-        date: item.updateTime ? item.updateTime.replace('T', ' ') : '未知时间',
+        type: item.type,
+        date: timeStr,
         isFolder: item.type === 'folder'
-      }))
-    } else {
-      ElMessage.error(res.data.message || '获取文件列表失败')
-    }
+      }
+    })
   } catch (error) {
-    console.error(error)
-    ElMessage.error('网络请求异常或未登录')
+    console.error('加载列表异常:', error)
   }
 }
 
-// 页面一加载，就去请求后端数据
 onMounted(() => {
   loadFileList()
 })
 
-
-// ========== 删除文件/文件夹逻辑 (打通回收站) ==========
+// ========== 删除文件/文件夹逻辑 ==========
 const handleDelete = (row) => {
   ElMessageBox.confirm(`确定要把 [${row.name}] 移入回收站吗？`, '提示', {
     confirmButtonText: '确定',
@@ -183,26 +191,18 @@ const handleDelete = (row) => {
     type: 'warning',
   }).then(async () => {
     try {
-      // 判断是删文件夹还是删文件，调用不同的接口
-      const url = row.isFolder
-          ? `http://localhost:8080/api/folder/${row.id}`
-          : `http://localhost:8080/api/file/${row.id}`
+      const url = row.isFolder ? `/folder/${row.id}` : `/file/${row.id}`
+      await request.delete(url) // 极简调用
 
-      const res = await axios.delete(url, { headers: getAuthHeaders() })
-      if (res.data.code === 200) {
-        ElMessage.success('已移入回收站')
-        loadFileList() // 重新加载列表，刷新视图
-      } else {
-        ElMessage.error(res.data.message)
-      }
+      ElMessage.success('已移入回收站')
+      loadFileList()
     } catch (e) {
-      ElMessage.error('删除失败')
+      // 错误由 request.js 统一处理
     }
   }).catch(() => {})
 }
 
-
-// ========== 分享逻辑 (保留你原来的，但加上了 Token) ==========
+// ========== 分享逻辑 ==========
 const shareDialogVisible = ref(false)
 const sharing = ref(false)
 const currentFile = ref(null)
@@ -222,96 +222,84 @@ const handleShare = (row) => {
 const createShareLink = async () => {
   sharing.value = true
   try {
-    const res = await axios.post('http://localhost:8080/share/create', {
+    // 假设后端分享接口为 /api/share/create
+    const res = await request.post('/share/create', {
       fileId: currentFile.value.id,
       expireType: shareForm.expireType
-    }, {
-      headers: getAuthHeaders() // 分享接口同样需要 Token！
     })
-
-    if (res.data.code === 200) {
-      shareResult.value = res.data.data // 注意这里获取的是 res.data.data
-      ElMessage.success('分享成功')
-    } else {
-      ElMessage.error(res.data.message)
-    }
+    shareResult.value = res.data
+    ElMessage.success('分享成功')
   } catch (e) {
-    ElMessage.error('创建失败，请检查后端')
+    // 错误由 request.js 统一处理
   } finally {
     sharing.value = false
+  }
+}
+
+// ========== 处理表格行点击 ==========
+const handleRowClick = (row) => {
+  if (row.isFolder) {
+    // 如果是文件夹，把当前目录 ID 切过去，并重新加载列表
+    currentFolderId.value = row.id;
+    loadFileList();
+  } else {
+    // 如果是文件，暂给个提示（以后可以接预览功能）
+    ElMessage.info(`选定了文件: ${row.name}`);
   }
 }
 
 const copyText = (text) => {
   navigator.clipboard.writeText(text).then(() => ElMessage.success('已复制'))
 }
+
 // ========== 新建文件夹逻辑 ==========
 const handleCreateFolder = () => {
   ElMessageBox.prompt('给你的新文件夹起个名字吧', '新建文件夹', {
     confirmButtonText: '确定',
     cancelButtonText: '取消',
-    inputPattern: /^[\u4e00-\u9fa5_a-zA-Z0-9]+$/, // 强制命名规范，保持整洁
+    inputPattern: /^[\u4e00-\u9fa5_a-zA-Z0-9]+$/,
     inputErrorMessage: '名称只能包含中英文、数字和下划线',
   }).then(async ({ value }) => {
     try {
-      const res = await axios.post('http://localhost:8080/api/folder/create', {
+      await request.post('/folder/create', {
         name: value,
-        parentId: currentFolderId.value // 传入当前所在的目录 ID
-      }, {
-        headers: getAuthHeaders() // 别忘了你的 JWT Token
+        parentId: currentFolderId.value
       })
-
-      if (res.data.code === 200) {
-        ElMessage.success('文件夹就绪')
-        loadFileList() // 重新向后端拉取数据，页面瞬间刷新
-      } else {
-        ElMessage.error(res.data.message || '创建失败')
-      }
+      ElMessage.success('文件夹就绪')
+      loadFileList()
     } catch (error) {
-      ElMessage.error('服务器开小差了')
+      // 错误由 request.js 统一处理
     }
-  }).catch(() => {}) // 用户点取消时不报错
+  }).catch(() => {})
 }
 
-
-// ========== 极简上传逻辑 ==========
+// ========== 文件上传逻辑 ==========
 const fileInput = ref(null)
 
-// 点击 UI 按钮时，偷偷触发隐藏的 input
 const triggerUpload = () => {
   fileInput.value.click()
 }
 
-// 浏览器选好文件后，正式向后端发送
 const handleFileUpload = async (event) => {
   const file = event.target.files[0]
   if (!file) return
 
-  // 对于文件上传，必须使用 FormData 格式，不能用普通的 JSON
   const formData = new FormData()
   formData.append('file', file)
   formData.append('folderId', currentFolderId.value)
 
   try {
     ElMessage.info('正在全速上传...')
-    const res = await axios.post('http://localhost:8080/api/file/upload', formData, {
-      headers: {
-        ...getAuthHeaders(),
-        'Content-Type': 'multipart/form-data' // 强制声明是文件流
-      }
-    })
+    // 【改动4】axios 遇到 FormData 会自动把 Content-Type 设为 multipart/form-data，无需手动干预
+    await request.post('/file/upload', formData)
 
-    if (res.data.code === 200) {
-      ElMessage.success('数字资产已落盘')
-      loadFileList() // 刷新列表，展示新文件
-    } else {
-      ElMessage.error(res.data.message || '上传受阻')
-    }
+    ElMessage.success('数字资产已落盘')
+    await loadFileList()
+    loadFileList()
   } catch (error) {
-    console.error(error)
-    ElMessage.error('上传失败，请检查文件大小限制或网络状态')
+    console.error('上传受阻:', error)
   } finally {
-    event.target.value = '' // 清理痕迹，保证下次选同一个文件也能触发上传
+    event.target.value = ''
   }
 }
 </script>
