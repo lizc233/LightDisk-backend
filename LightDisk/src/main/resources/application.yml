@@ -6,13 +6,12 @@ spring:
     pathmatch:
       matching-strategy: ant_path_matcher
   profiles:
-    active: dev # 激活开发环境
+    active: dev
   main:
-    allow-circular-references: true # 允许循环引用，老项目常见
+    allow-circular-references: true
   datasource:
-    # 这里我们不用复杂的变量，直接对接 application-dev.yml 里的私密数据
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://${star.datasource.host}:${star.datasource.port}/${star.datasource.database}?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=utf-8&useSSL=false
+    url: jdbc:mysql://${star.datasource.host}:${star.datasource.port}/${star.datasource.database}?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=utf-8&useSSL=false&allowPublicKeyRetrieval=true
     username: ${star.datasource.username}
     password: ${star.datasource.password}
   redis:
@@ -26,15 +25,17 @@ spring:
         max-idle: 8
         max-wait: -1ms
         min-idle: 0
+  servlet:
+    multipart:
+      max-file-size: 10GB
+      max-request-size: 10GB
 
-# MyBatis-Plus 配置 (适配你刚才生成的代码)
 mybatis-plus:
   mapper-locations: classpath:mapper/*.xml
   type-aliases-package: com.star.entity
   configuration:
     map-underscore-to-camel-case: true
 
-# 日志配置（改成你的包名 com.star）
 logging:
   level:
     com:
@@ -42,5 +43,11 @@ logging:
         mapper: debug
         service: info
         controller: info
+
 file:
   upload-dir: E:/lightdisk_data/uploads
+
+lightdisk:
+  mail:
+    enabled: false
+    from:

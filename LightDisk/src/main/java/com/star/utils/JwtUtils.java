@@ -6,11 +6,9 @@ import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.SignatureAlgorithm;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
-import javax.servlet.http.HttpServletRequest;
 import java.util.Date;
 
 @Component
@@ -43,19 +41,24 @@ public class JwtUtils {
      */
     public Claims parseToken(String token) {
         try {
+            if (token == null || token.trim().isEmpty()) {
+                throw new BusinessException("登录已失效，请重新登录");
+            }
+            String rawToken = token.replace("Bearer ", "");
             Claims claims = Jwts.parser()
                     .setSigningKey(secret)
-                    .parseClaimsJws(token.replace("Bearer ", ""))
+                    .parseClaimsJws(rawToken)
                     .getBody();
 
-            // 企业级安全检查：去 Redis 查一下这个用户是否被“拉黑”或已“下线”
             String userId = claims.getSubject();
-            Boolean isBlacklisted = redisTemplate.hasKey("auth:blacklist:" + userId);
-            if (Boolean.TRUE.equals(isBlacklisted)) {
+            String latestToken = redisTemplate.opsForValue().get("auth:token:" + userId);
+            if (latestToken == null || !latestToken.equals(rawToken)) {
                 throw new BusinessException("登录已失效，请重新登录");
             }
 
             return claims;
+        } catch (BusinessException e) {
+            throw e;
         } catch (ExpiredJwtException e) {
             throw new BusinessException("Token 已过期");
         } catch (Exception e) {

@@ -1,7 +1,9 @@
 package com.star.service;
 
+import com.star.model.dto.CreateFolderDTO;
 import com.star.model.entity.Folder;
 import com.baomidou.mybatisplus.extension.service.IService;
+import java.util.List;
 
 /**
 * @author Lizc233
@@ -9,6 +11,10 @@ import com.baomidou.mybatisplus.extension.service.IService;
 * @createDate 2026-03-27 19:21:42
 */
 public interface IFolderService extends IService<Folder> {
+
+    Long createFolder(CreateFolderDTO dto, Long userId);
+
+    List<Folder> listAllFolders(Long userId);
 
     void deleteFolder(Long folderId, Long userId);
 

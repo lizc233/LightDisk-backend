@@ -7,14 +7,12 @@ import com.star.common.Result;
 import com.star.model.entity.Folder;
 import com.star.mapper.FolderMapper;
 import com.star.service.IFolderService;
-import com.star.utils.JwtUtils;
 import io.swagger.annotations.Api;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
 import javax.servlet.http.HttpServletRequest;
-import java.time.LocalDateTime;
-import java.util.Date;
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/folder")
@@ -30,23 +28,13 @@ public class FolderController {
                                HttpServletRequest request) {
 
         Long userId = BaseContext.getCurrentId();
+        return Result.success(folderService.createFolder(dto, userId));
+    }
 
-        Folder folder = new Folder();
-        folder.setFolderName(dto.getName());
-        folder.setParentId(dto.getParentId() != null ? dto.getParentId() : 0);
-        folder.setUserId(userId);
-        folder.setIsDeleted(0);
-        folder.setCreatedAt(LocalDateTime.now());
-
-        if (folder.getParentId() == 0) {
-            folder.setPath("/" + folder.getFolderName() + "/");
-        } else {
-            Folder parent = folderMapper.selectById(folder.getParentId());
-            folder.setPath(parent.getPath() + folder.getFolderName() + "/");
-        }
-
-        folderMapper.insert(folder);
-        return Result.success(folder.getId());
+    @GetMapping("/all")
+    public Result<List<Folder>> listAll(HttpServletRequest request) {
+        Long userId = BaseContext.getCurrentId();
+        return Result.success(folderService.listAllFolders(userId));
     }
 
     @GetMapping("/{folderId}")

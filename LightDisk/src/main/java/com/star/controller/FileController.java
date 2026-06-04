@@ -93,6 +93,15 @@ public class FileController {
         return Result.success(null);
     }
 
+    @PutMapping("/{fileId}/move")
+    public Result<Void> moveToFolder(@PathVariable Long fileId,
+                                     @RequestParam(value = "folderId", defaultValue = "0") Long folderId,
+                                     HttpServletRequest request) {
+        Long userId = BaseContext.getCurrentId();
+        fileService.moveFileToFolder(fileId, folderId, userId);
+        return Result.success(null);
+    }
+
     @DeleteMapping("/{fileId}/permanent")
     public Result<Void> permanentDelete(@PathVariable Long fileId,
                                         HttpServletRequest request) {

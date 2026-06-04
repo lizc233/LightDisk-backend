@@ -1,16 +1,22 @@
 package com.star.service;
 
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.baomidou.mybatisplus.extension.service.IService;
 import com.star.model.dto.ShareCreateDTO;
 import com.star.model.entity.Share;
-import com.baomidou.mybatisplus.extension.service.IService;
 import com.star.model.vo.ShareInfoVO;
 
-/**
-* @author Lizc233
-* @description 针对表【share(分享表)】的数据库操作Service
-* @createDate 2026-03-27 19:21:42
-*/
+import java.util.List;
+
 public interface ShareService extends IService<Share> {
 
     ShareInfoVO createShare(ShareCreateDTO dto, Long currentUserId);
+
+    Page<ShareInfoVO> getShareList(ShareCreateDTO dto, Long currentUserId);
+
+    int cancelShares(List<Long> shareIds, Long currentUserId);
+
+    int clearExpiredShares(Long currentUserId);
+
+    ShareInfoVO getPublicShareInfo(String shareCode);
 }

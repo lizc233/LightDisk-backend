@@ -197,6 +197,25 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements IF
     }
 
     @Override
+    public void moveFileToFolder(Long fileId, Long targetFolderId, Long userId) {
+        File userFile = fileMapper.selectById(fileId);
+        if (userFile == null || !userFile.getUserId().equals(userId) || userFile.getStatus() != 1) {
+            throw new BusinessException("文件不存在或无权限操作");
+        }
+
+        Long actualTargetFolderId = targetFolderId == null ? 0L : targetFolderId;
+        if (actualTargetFolderId != 0L) {
+            Folder targetFolder = folderMapper.selectById(actualTargetFolderId);
+            if (targetFolder == null || !targetFolder.getUserId().equals(userId) || targetFolder.getIsDeleted() != 0) {
+                throw new BusinessException("目标文件夹不存在或无权限操作");
+            }
+        }
+
+        userFile.setFolderId(actualTargetFolderId);
+        fileMapper.updateById(userFile);
+    }
+
+    @Override
     public void deleteFile(Long fileId, Long userId) {
         File userFile = fileMapper.selectById(fileId);
         if (userFile == null || !userFile.getUserId().equals(userId))
@@ -208,6 +227,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements IF
     }
 
     @Override
+    @Transactional
     public void permanentDeleteFile(Long fileId, Long userId) {
         File userFile = fileMapper.selectById(fileId);
         if (userFile == null || !userFile.getUserId().equals(userId))
@@ -227,8 +247,11 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements IF
             }
 
             User user = userMapper.selectById(userId);
-            user.setUsedSpace(user.getUsedSpace() - storageFile.getFileSize());
-            userMapper.updateById(user);
+            if (user != null) {
+                long nextUsedSpace = Math.max(defaultLong(user.getUsedSpace()) - defaultLong(storageFile.getFileSize()), 0L);
+                user.setUsedSpace(nextUsedSpace);
+                userMapper.updateById(user);
+            }
         }
     }
 
@@ -330,5 +353,9 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements IF
         resultPage.setRecords(voList);
         resultPage.setTotal(voList.size());
         return resultPage;
+    }
+
+    private long defaultLong(Long value) {
+        return value == null ? 0L : value;
     }
 }

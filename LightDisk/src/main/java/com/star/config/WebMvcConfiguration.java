@@ -1,5 +1,6 @@
 package com.star.config;
 
+import com.github.xiaoymin.knife4j.spring.annotations.EnableKnife4j;
 import com.star.interceptor.JwtTokenInterceptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
@@ -12,7 +13,6 @@ import springfox.documentation.builders.RequestHandlerSelectors;
 import springfox.documentation.service.ApiInfo;
 import springfox.documentation.spi.DocumentationType;
 import springfox.documentation.spring.web.plugins.Docket;
-import com.github.xiaoymin.knife4j.spring.annotations.EnableKnife4j;
 
 @Configuration
 @EnableKnife4j
@@ -20,27 +20,31 @@ public class WebMvcConfiguration extends WebMvcConfigurationSupport {
 
     @Autowired
     private JwtTokenInterceptor jwtTokenInterceptor;
+
+    @Override
     protected void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(jwtTokenInterceptor)
-                .addPathPatterns("/api/**") // 拦截所有业务接口
+                .addPathPatterns("/api/**")
                 .excludePathPatterns(
                         "/api/login",
-                        "/api/register"
-                        ); // 放行登录接口
-
+                        "/api/register",
+                        "/api/password/reset/send-code",
+                        "/api/password/reset",
+                        "/api/share/public/**"
+                );
     }
+
     @Bean
     public Docket docket() {
         ApiInfo apiInfo = new ApiInfoBuilder()
-                .title("轻量级云盘系统接口文档")
+                .title("LightDisk API")
                 .version("1.0")
-                .description("基于SpringBoot的轻量级云盘系统接口定义")
+                .description("LightDisk backend api documentation")
                 .build();
 
         return new Docket(DocumentationType.SWAGGER_2)
                 .apiInfo(apiInfo)
                 .select()
-                // 这里一定要指向你写 Controller 的包
                 .apis(RequestHandlerSelectors.basePackage("com.star.controller"))
                 .paths(PathSelectors.any())
                 .build();

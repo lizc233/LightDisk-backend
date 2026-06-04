@@ -17,6 +17,8 @@ public interface IFileService extends IService<File> {
 
     List<FileListVO> getFileList(Long folderId, Long userId);
 
+    void moveFileToFolder(Long fileId, Long targetFolderId, Long userId);
+
     void deleteFile(Long fileId, Long userId);
 
     void permanentDeleteFile(Long fileId, Long userId);
