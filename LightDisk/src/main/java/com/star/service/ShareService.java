@@ -19,4 +19,8 @@ public interface ShareService extends IService<Share> {
     int clearExpiredShares(Long currentUserId);
 
     ShareInfoVO getPublicShareInfo(String shareCode);
+
+    String downloadPublicShare(String shareCode, String extractCode);
+
+    Long savePublicShareToMyDisk(String shareCode, String extractCode, Long currentUserId);
 }

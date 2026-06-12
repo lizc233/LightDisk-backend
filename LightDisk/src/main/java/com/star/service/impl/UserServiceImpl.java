@@ -54,6 +54,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
     private static final int DEFAULT_RECYCLE_REMINDER_DAYS = 3;
     private static final String ACTION_PREVIEW = "preview";
     private static final String ACTION_DOWNLOAD = "download";
+    private static final String USERNAME_PATTERN = "^[\\u4e00-\\u9fa5A-Za-z0-9_-]+$";
 
     private final JwtUtils jwtUtils;
     private final StringRedisTemplate redisTemplate;
@@ -102,6 +103,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
                 .token("Bearer " + token)
                 .email(user.getEmail())
                 .role(user.getRole())
+                .isAdmin(defaultInt(user.getIsAdmin(), 0))
                 .usedSpace(defaultLong(user.getUsedSpace()))
                 .totalSpace(defaultLong(vipConfig.getMaxSpace()))
                 .levelName(vipConfig.getLevelName())
@@ -112,9 +114,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
     @Override
     public void register(RegisterDTO registerDTO) {
         String username = StrUtil.trim(registerDTO.getUsername());
-        if (StrUtil.isBlank(username)) {
-            throw new BusinessException("用户名不能为空");
-        }
+        validateUsername(username);
 
         User existingUser = this.getOne(new LambdaQueryWrapper<User>().eq(User::getUsername, username));
         if (existingUser != null) {
@@ -129,6 +129,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         user.setStatus(1);
         user.setUsedSpace(0L);
         user.setRole(0);
+        user.setIsAdmin(0);
         user.setCreatedAt(LocalDateTime.now());
         user.setUpdatedAt(LocalDateTime.now());
 
@@ -322,6 +323,10 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
             user.setUsedSpace(0L);
             changed = true;
         }
+        if (user.getIsAdmin() == null) {
+            user.setIsAdmin(0);
+            changed = true;
+        }
         if (user.getRole() > 0 && user.getVipExpireTime() != null && user.getVipExpireTime().isBefore(LocalDateTime.now())) {
             user.setRole(0);
             user.setVipExpireTime(null);
@@ -344,6 +349,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         data.put("username", user.getUsername());
         data.put("email", user.getEmail());
         data.put("role", currentConfig.getLevel());
+        data.put("isAdmin", defaultInt(user.getIsAdmin(), 0));
         data.put("levelName", currentConfig.getLevelName());
         data.put("usedSpace", defaultLong(user.getUsedSpace()));
         data.put("totalSpace", defaultLong(currentConfig.getMaxSpace()));
@@ -496,6 +502,18 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         }
         if (!Validator.isEmail(email)) {
             throw new BusinessException("邮箱格式不正确");
+        }
+    }
+
+    private void validateUsername(String username) {
+        if (StrUtil.isBlank(username)) {
+            throw new BusinessException("用户名不能为空");
+        }
+        if (username.length() < 2 || username.length() > 20) {
+            throw new BusinessException("用户名长度需在 2 到 20 个字符之间");
+        }
+        if (!username.matches(USERNAME_PATTERN)) {
+            throw new BusinessException("用户名仅支持中文、字母、数字、下划线和中划线");
         }
     }
 

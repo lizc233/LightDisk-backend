@@ -42,6 +42,11 @@ public class User {
     private Integer role;
 
     /**
+     * 0-普通用户 1-管理员
+     */
+    private Integer isAdmin;
+
+    /**
      * 已使用空间
      */
     private Long usedSpace;
@@ -83,6 +88,7 @@ public class User {
             && (this.getPassword() == null ? other.getPassword() == null : this.getPassword().equals(other.getPassword()))
             && (this.getEmail() == null ? other.getEmail() == null : this.getEmail().equals(other.getEmail()))
             && (this.getRole() == null ? other.getRole() == null : this.getRole().equals(other.getRole()))
+            && (this.getIsAdmin() == null ? other.getIsAdmin() == null : this.getIsAdmin().equals(other.getIsAdmin()))
             && (this.getUsedSpace() == null ? other.getUsedSpace() == null : this.getUsedSpace().equals(other.getUsedSpace()))
             && (this.getVipExpireTime() == null ? other.getVipExpireTime() == null : this.getVipExpireTime().equals(other.getVipExpireTime()))
             && (this.getStatus() == null ? other.getStatus() == null : this.getStatus().equals(other.getStatus()))
@@ -99,6 +105,7 @@ public class User {
         result = prime * result + ((getPassword() == null) ? 0 : getPassword().hashCode());
         result = prime * result + ((getEmail() == null) ? 0 : getEmail().hashCode());
         result = prime * result + ((getRole() == null) ? 0 : getRole().hashCode());
+        result = prime * result + ((getIsAdmin() == null) ? 0 : getIsAdmin().hashCode());
         result = prime * result + ((getUsedSpace() == null) ? 0 : getUsedSpace().hashCode());
         result = prime * result + ((getVipExpireTime() == null) ? 0 : getVipExpireTime().hashCode());
         result = prime * result + ((getStatus() == null) ? 0 : getStatus().hashCode());
@@ -118,6 +125,7 @@ public class User {
         sb.append(", password=").append(password);
         sb.append(", email=").append(email);
         sb.append(", role=").append(role);
+        sb.append(", isAdmin=").append(isAdmin);
         sb.append(", usedSpace=").append(usedSpace);
         sb.append(", vipExpireTime=").append(vipExpireTime);
         sb.append(", status=").append(status);

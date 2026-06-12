@@ -8,10 +8,14 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.star.exception.BusinessException;
 import com.star.mapper.FileMapper;
 import com.star.mapper.ShareMapper;
+import com.star.mapper.StorageFileMapper;
 import com.star.mapper.UserSettingsMapper;
+import com.star.mapper.UserMapper;
 import com.star.model.dto.ShareCreateDTO;
 import com.star.model.entity.File;
 import com.star.model.entity.Share;
+import com.star.model.entity.StorageFile;
+import com.star.model.entity.User;
 import com.star.model.entity.UserSettings;
 import com.star.model.vo.ShareInfoVO;
 import com.star.service.ShareService;
@@ -26,6 +30,8 @@ import java.time.format.DateTimeFormatter;
 import java.util.Date;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Service
@@ -36,10 +42,13 @@ public class ShareServiceImpl extends ServiceImpl<ShareMapper, Share> implements
     private static final String SHARE_REDIS_PREFIX = "share:code:";
     private static final String SHARE_BASE_URL = "http://localhost:5173/share/";
     private static final int DEFAULT_SHARE_EXPIRE_DAYS = 15;
+    private static final Pattern SHARE_CODE_PATTERN = Pattern.compile("([A-Za-z0-9]{8,12})");
 
     private final StringRedisTemplate redisTemplate;
     private final FileMapper fileMapper;
     private final UserSettingsMapper userSettingsMapper;
+    private final StorageFileMapper storageFileMapper;
+    private final UserMapper userMapper;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -147,12 +156,85 @@ public class ShareServiceImpl extends ServiceImpl<ShareMapper, Share> implements
 
     @Override
     public ShareInfoVO getPublicShareInfo(String shareCode) {
-        Share share = this.getOne(new LambdaQueryWrapper<Share>()
-                .eq(Share::getShareCode, shareCode));
-        if (share == null) {
-            throw new BusinessException("分享链接不存在");
-        }
+        Share share = loadValidShare(shareCode);
         return toShareInfoVO(share);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public String downloadPublicShare(String shareCode, String extractCode) {
+        Share share = loadValidShare(shareCode);
+        validateExtractCode(share, extractCode);
+
+        File userFile = fileMapper.selectById(share.getItemId());
+        if (userFile == null || userFile.getStatus() != 1) {
+            throw new BusinessException("分享文件不存在或已失效");
+        }
+        StorageFile storageFile = storageFileMapper.selectById(userFile.getStorageId());
+        if (storageFile == null) {
+            throw new BusinessException("物理文件不存在");
+        }
+
+        increaseShareVisitCount(share);
+        userFile.setDownloadCount((userFile.getDownloadCount() == null ? 0 : userFile.getDownloadCount()) + 1);
+        fileMapper.updateById(userFile);
+        return storageFile.getRealPath();
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public Long savePublicShareToMyDisk(String shareCode, String extractCode, Long currentUserId) {
+        Share share = loadValidShare(shareCode);
+        validateExtractCode(share, extractCode);
+
+        File sourceFile = fileMapper.selectById(share.getItemId());
+        if (sourceFile == null || sourceFile.getStatus() != 1) {
+            throw new BusinessException("分享文件不存在或已失效");
+        }
+        if (sourceFile.getUserId().equals(currentUserId)) {
+            throw new BusinessException("该文件已在你的网盘中");
+        }
+
+        User currentUser = userMapper.selectById(currentUserId);
+        if (currentUser == null) {
+            throw new BusinessException("当前用户不存在");
+        }
+
+        StorageFile storageFile = storageFileMapper.selectById(sourceFile.getStorageId());
+        if (storageFile == null) {
+            throw new BusinessException("物理文件不存在");
+        }
+
+        File existingFile = fileMapper.selectOne(new LambdaQueryWrapper<File>()
+                .eq(File::getUserId, currentUserId)
+                .eq(File::getFolderId, 0L)
+                .eq(File::getFileName, sourceFile.getFileName())
+                .eq(File::getStatus, 1));
+        if (existingFile != null) {
+            throw new BusinessException("我的网盘根目录已存在同名文件");
+        }
+
+        File targetFile = new File();
+        targetFile.setFileName(sourceFile.getFileName());
+        targetFile.setStorageId(sourceFile.getStorageId());
+        targetFile.setUserId(currentUserId);
+        targetFile.setFolderId(0L);
+        targetFile.setDownloadCount(0);
+        targetFile.setStatus(1);
+        targetFile.setDeleteTime(null);
+        targetFile.setCreatedAt(LocalDateTime.now());
+        targetFile.setUpdatedAt(LocalDateTime.now());
+        fileMapper.insert(targetFile);
+
+        storageFile.setRefCount((storageFile.getRefCount() == null ? 0 : storageFile.getRefCount()) + 1);
+        storageFileMapper.updateById(storageFile);
+
+        currentUser.setUsedSpace((currentUser.getUsedSpace() == null ? 0L : currentUser.getUsedSpace()) +
+                (storageFile.getFileSize() == null ? 0L : storageFile.getFileSize()));
+        userMapper.updateById(currentUser);
+
+        increaseShareVisitCount(share);
+        return targetFile.getId();
     }
 
     private ShareInfoVO toShareInfoVO(Share share) {
@@ -239,5 +321,44 @@ public class ShareServiceImpl extends ServiceImpl<ShareMapper, Share> implements
         if (expireDays == null || (expireDays != 7 && expireDays != 15 && expireDays != 30)) {
             throw new BusinessException("分享有效期仅支持 7/15/30 天");
         }
+    }
+
+    private Share loadValidShare(String shareCode) {
+        String normalizedShareCode = normalizeShareCode(shareCode);
+        Share share = this.getOne(new LambdaQueryWrapper<Share>()
+                .eq(Share::getShareCode, normalizedShareCode));
+        if (share == null) {
+            throw new BusinessException("分享链接不存在");
+        }
+        if (isExpired(share)) {
+            throw new BusinessException("该分享链接已失效或被取消");
+        }
+        return share;
+    }
+
+    private void validateExtractCode(Share share, String extractCode) {
+        if (extractCode == null || extractCode.trim().length() != 4) {
+            throw new BusinessException("请输入正确的4位提取码");
+        }
+        if (!share.getExtractCode().equals(extractCode.trim())) {
+            throw new BusinessException("提取码错误");
+        }
+    }
+
+    private void increaseShareVisitCount(Share share) {
+        share.setVisitCount((share.getVisitCount() == null ? 0 : share.getVisitCount()) + 1);
+        this.updateById(share);
+    }
+
+    private String normalizeShareCode(String shareCode) {
+        if (shareCode == null) {
+            throw new BusinessException("分享链接不存在");
+        }
+        String raw = shareCode.trim();
+        Matcher matcher = SHARE_CODE_PATTERN.matcher(raw);
+        if (!matcher.find()) {
+            throw new BusinessException("分享链接不存在");
+        }
+        return matcher.group(1);
     }
 }

@@ -7,6 +7,7 @@ import java.util.List;
 @Data
 public class ShareCreateDTO {
     private Long fileId;
+    private String extractCode;
     private Integer expireType;
     private Integer expireDays;
     private Integer pageNum = 1;

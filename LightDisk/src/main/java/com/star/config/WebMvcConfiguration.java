@@ -30,7 +30,8 @@ public class WebMvcConfiguration extends WebMvcConfigurationSupport {
                         "/api/register",
                         "/api/password/reset/send-code",
                         "/api/password/reset",
-                        "/api/share/public/**"
+                        "/api/share/public/*",
+                        "/api/share/public/*/download"
                 );
     }
 

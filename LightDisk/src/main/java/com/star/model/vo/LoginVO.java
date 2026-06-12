@@ -13,6 +13,7 @@ public class LoginVO {
     private String token; // 最终生成的 JWT
     private String email;
     private Integer role;
+    private Integer isAdmin;
     private Long usedSpace;
     private Long totalSpace;
     private String levelName;
