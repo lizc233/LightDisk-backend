@@ -83,14 +83,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
             throw new BusinessException("用户名不存在");
         }
 
-        // 是否以管理员身份登录（前端登录页勾选“我是管理员”）
-        boolean adminLogin = Boolean.TRUE.equals(loginDTO.getAdminLogin());
-
-        if (adminLogin && defaultInt(user.getIsAdmin(), 0) != 1) {
-            throw new BusinessException("该账号不是管理员账号");
-        }
-
-        if (!isPasswordMatched(user, password, adminLogin)) {
+        if (!isPasswordMatched(user, password)) {
             throw new BusinessException("用户名或密码错误");
         }
 
@@ -236,7 +229,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         }
         validateNewPassword(newPassword);
 
-        if (!isPasswordMatched(user, oldPassword, false)) {
+        if (!isPasswordMatched(user, oldPassword)) {
             throw new BusinessException("旧密码不正确");
         }
 
@@ -572,53 +565,45 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
     /**
      * 校验登录密码。
      *
-     * <p>普通登录：只接受 MD5(明文 + 用户名 + 固定盐) 的加密串。</p>
+     * <p>标准规则：MD5(明文 + 用户名 + 固定盐)。</p>
      *
-     * <p>管理员登录（勾选“我是管理员”）：兼容多种存储形式，避免线上库里的
-     * 管理员密码被手工改过、或加密规则不一致导致管理员永远登不进去：</p>
+     * <p>管理员账号（is_admin=1）额外兼容历史遗留的几种存储形式，
+     * 避免线上库里的密码格式与当前代码不一致、导致管理员永远登不进去：</p>
      * <ol>
-     *     <li>标准加密串 MD5(明文 + 用户名 + 固定盐)</li>
      *     <li>不带盐的 MD5(明文)</li>
      *     <li>数据库里直接存了明文</li>
-     *     <li>数据库里存的是别的盐/别的用户名拼出来的 MD5（无法反推时，只要是 32 位十六进制，
-     *         就允许管理员明文直登，并在验证通过后把密码升级成标准加密串）</li>
+     *     <li>兜底：存的是 32 位十六进制摘要，但用的盐/用户名规则与当前代码不一致</li>
      * </ol>
-     * 命中第 2、3、4 种情况时，会顺带把库里的密码重置为标准加密串，实现自愈。
+     * 以上任一命中时，会顺带把库里的密码升级为标准加密串，实现自愈。
+     *
+     * <p>普通用户只走标准规则，保证安全性。</p>
      */
-    private boolean isPasswordMatched(User user, String rawPassword, boolean adminLogin) {
+    private boolean isPasswordMatched(User user, String rawPassword) {
         String stored = user.getPassword();
         if (StrUtil.isBlank(stored)) {
             return false;
         }
 
-        // 1. 标准加密串
+        // 1. 标准规则（所有用户）
         if (StrUtil.equals(stored, encryptPassword(user.getUsername(), rawPassword))) {
             return true;
         }
 
-        if (!adminLogin) {
+        // 2. 以下放宽规则仅对管理员生效
+        if (defaultInt(user.getIsAdmin(), 0) != 1) {
             return false;
         }
 
-        // 2. 不带盐的 MD5(明文)
-        boolean matched = StrUtil.equalsIgnoreCase(stored, DigestUtil.md5Hex(rawPassword));
+        boolean matched = StrUtil.equalsIgnoreCase(stored, DigestUtil.md5Hex(rawPassword))
+                || StrUtil.equals(stored, rawPassword)
+                || isMd5Hex(stored);
 
-        // 3. 数据库里存的就是明文
-        if (!matched && StrUtil.equals(stored, rawPassword)) {
-            matched = true;
-        }
-
-        // 4. 兜底：存的是 32 位十六进制摘要，但用的盐/用户名规则与当前代码不一致。
-        //    只要管理员勾选了“我是管理员”，就允许明文登录。
-        if (!matched && isMd5Hex(stored)) {
-            matched = true;
-        }
-
-        // 自愈：把密码升级成标准加密串
         if (matched) {
+            // 自愈：升级为标准加密串
             user.setPassword(encryptPassword(user.getUsername(), rawPassword));
             user.setUpdatedAt(LocalDateTime.now());
             this.updateById(user);
+            log.info("管理员 [{}] 密码已自动升级为标准加密格式", user.getUsername());
         }
         return matched;
     }
