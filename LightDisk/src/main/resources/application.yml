@@ -31,8 +31,10 @@ spring:
       max-request-size: 10GB
 
 mybatis-plus:
-  mapper-locations: classpath:mapper/*.xml
-  type-aliases-package: com.star.entity
+  mapper-locations:
+    - classpath:mapper/*.xml
+    - classpath:com/star/mapper/*.xml
+  type-aliases-package: com.star.model.entity
   configuration:
     map-underscore-to-camel-case: true
 

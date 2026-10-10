@@ -10,6 +10,7 @@
             <result property="password" column="password" />
             <result property="email" column="email" />
             <result property="role" column="role" />
+            <result property="isAdmin" column="is_admin" />
             <result property="usedSpace" column="used_space" />
             <result property="vipExpireTime" column="vip_expire_time" />
             <result property="status" column="status" />
@@ -18,7 +19,7 @@
     </resultMap>
 
     <sql id="Base_Column_List">
-        id,username,password,email,role,used_space,
+        id,username,password,email,role,is_admin,used_space,
         vip_expire_time,status,created_at,updated_at
     </sql>
 </mapper>

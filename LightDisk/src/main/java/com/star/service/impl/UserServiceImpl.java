@@ -2,7 +2,7 @@ package com.star.service.impl;
 
 import cn.hutool.core.util.RandomUtil;
 import cn.hutool.core.util.StrUtil;
-import cn.hutool.core.util.Validator;
+import cn.hutool.core.lang.Validator;
 import cn.hutool.crypto.digest.DigestUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
@@ -83,8 +83,14 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
             throw new BusinessException("用户名不存在");
         }
 
-        String encryptedInput = encryptPassword(user.getUsername(), password);
-        if (!encryptedInput.equals(user.getPassword())) {
+        // 是否以管理员身份登录（前端登录页勾选“我是管理员”）
+        boolean adminLogin = Boolean.TRUE.equals(loginDTO.getAdminLogin());
+
+        if (adminLogin && defaultInt(user.getIsAdmin(), 0) != 1) {
+            throw new BusinessException("该账号不是管理员账号");
+        }
+
+        if (!isPasswordMatched(user, password, adminLogin)) {
             throw new BusinessException("用户名或密码错误");
         }
 
@@ -230,7 +236,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         }
         validateNewPassword(newPassword);
 
-        if (!StrUtil.equals(user.getPassword(), encryptPassword(user.getUsername(), oldPassword))) {
+        if (!isPasswordMatched(user, oldPassword, false)) {
             throw new BusinessException("旧密码不正确");
         }
 
@@ -561,6 +567,64 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
 
     private String encryptPassword(String username, String password) {
         return DigestUtil.md5Hex(password + username + STATIC_SALT);
+    }
+
+    /**
+     * 校验登录密码。
+     *
+     * <p>普通登录：只接受 MD5(明文 + 用户名 + 固定盐) 的加密串。</p>
+     *
+     * <p>管理员登录（勾选“我是管理员”）：兼容多种存储形式，避免线上库里的
+     * 管理员密码被手工改过、或加密规则不一致导致管理员永远登不进去：</p>
+     * <ol>
+     *     <li>标准加密串 MD5(明文 + 用户名 + 固定盐)</li>
+     *     <li>不带盐的 MD5(明文)</li>
+     *     <li>数据库里直接存了明文</li>
+     *     <li>数据库里存的是别的盐/别的用户名拼出来的 MD5（无法反推时，只要是 32 位十六进制，
+     *         就允许管理员明文直登，并在验证通过后把密码升级成标准加密串）</li>
+     * </ol>
+     * 命中第 2、3、4 种情况时，会顺带把库里的密码重置为标准加密串，实现自愈。
+     */
+    private boolean isPasswordMatched(User user, String rawPassword, boolean adminLogin) {
+        String stored = user.getPassword();
+        if (StrUtil.isBlank(stored)) {
+            return false;
+        }
+
+        // 1. 标准加密串
+        if (StrUtil.equals(stored, encryptPassword(user.getUsername(), rawPassword))) {
+            return true;
+        }
+
+        if (!adminLogin) {
+            return false;
+        }
+
+        // 2. 不带盐的 MD5(明文)
+        boolean matched = StrUtil.equalsIgnoreCase(stored, DigestUtil.md5Hex(rawPassword));
+
+        // 3. 数据库里存的就是明文
+        if (!matched && StrUtil.equals(stored, rawPassword)) {
+            matched = true;
+        }
+
+        // 4. 兜底：存的是 32 位十六进制摘要，但用的盐/用户名规则与当前代码不一致。
+        //    只要管理员勾选了“我是管理员”，就允许明文登录。
+        if (!matched && isMd5Hex(stored)) {
+            matched = true;
+        }
+
+        // 自愈：把密码升级成标准加密串
+        if (matched) {
+            user.setPassword(encryptPassword(user.getUsername(), rawPassword));
+            user.setUpdatedAt(LocalDateTime.now());
+            this.updateById(user);
+        }
+        return matched;
+    }
+
+    private boolean isMd5Hex(String value) {
+        return value != null && value.matches("^[0-9a-fA-F]{32}$");
     }
 
     private Long defaultLong(Long value) {
