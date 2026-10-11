@@ -28,4 +28,15 @@ public interface PersonalMessageService {
      * 删除个人消息
      */
     void deleteMessage(Long userId, Long messageId);
+
+    /**
+     * 收件人把消息附件转存到自己的网盘根目录
+     * 复用分享转存的引用计数逻辑：新 file 记录指向同一物理 storage_file，refCount+1
+     *
+     * @param userId    当前用户（必须是该消息的收件人）
+     * @param messageId 消息ID
+     * @param fileId    附件引用的文件ID（必须存在于该消息的 attachments 中）
+     * @return 新建 file 记录的 ID
+     */
+    Long saveAttachmentToMyDisk(Long userId, Long messageId, Long fileId);
 }

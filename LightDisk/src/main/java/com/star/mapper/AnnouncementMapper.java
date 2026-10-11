@@ -20,4 +20,9 @@ public interface AnnouncementMapper extends BaseMapper<Announcement> {
      * 查询用户可见的系统通知（type=2, 已发布, 全员或指定给该用户的）
      */
     List<Announcement> selectSystemNotificationsForUser(@Param("userId") Long userId);
+
+    /**
+     * 统计用户未读的系统通知数（LEFT JOIN 已读表，一条 SQL 完成，实时准确）
+     */
+    Long countUnreadSystemNotifications(@Param("userId") Long userId);
 }

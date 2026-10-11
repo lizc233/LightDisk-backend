@@ -1,14 +1,21 @@
 package com.star.service.impl;
 
 import cn.hutool.core.util.StrUtil;
+import cn.hutool.json.JSONArray;
+import cn.hutool.json.JSONObject;
+import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.star.exception.BusinessException;
+import com.star.mapper.FileMapper;
 import com.star.mapper.PersonalMessageMapper;
+import com.star.mapper.StorageFileMapper;
 import com.star.mapper.UserMapper;
 import com.star.mapper.UserSettingsMapper;
 import com.star.model.dto.PersonalMessageSendDTO;
+import com.star.model.entity.File;
 import com.star.model.entity.PersonalMessage;
+import com.star.model.entity.StorageFile;
 import com.star.model.entity.User;
 import com.star.model.entity.UserSettings;
 import com.star.model.vo.PersonalMessageVO;
@@ -52,7 +59,9 @@ public class PersonalMessageServiceImpl implements PersonalMessageService {
     private final UserMapper userMapper;
     private final UserSettingsMapper userSettingsMapper;
     private final UserContactService userContactService;
-    private final NotificationServiceImpl notificationService; // 用于刷新缓存
+    private final com.star.service.NotificationService notificationService; // 未读缓存失效
+    private final FileMapper fileMapper;
+    private final StorageFileMapper storageFileMapper;
 
     @Override
     public Map<String, Object> getMessageList(Long userId, Integer pageNum, Integer pageSize, String group) {
@@ -159,8 +168,8 @@ public class PersonalMessageServiceImpl implements PersonalMessageService {
             personalMessageMapper.insert(msg);
             messages.add(msg);
 
-            // Redis 未读数 +1
-            notificationService.incrementUnreadCache(receiverId);
+            // 未读数缓存失效（下次查询从 DB 重算，保证与数据库同步）
+            notificationService.evictUnreadCache(receiverId);
 
             // 可选：顺手加为联系人
             if (autoAddContact && !userContactService.isContact(senderId, receiverId)) {
@@ -184,6 +193,87 @@ public class PersonalMessageServiceImpl implements PersonalMessageService {
             throw new BusinessException("无权删除此消息");
         }
         personalMessageMapper.deleteById(messageId);
+    }
+
+    @Override
+    @Transactional
+    public Long saveAttachmentToMyDisk(Long userId, Long messageId, Long fileId) {
+        if (messageId == null || fileId == null) {
+            throw new BusinessException("参数不完整");
+        }
+        PersonalMessage msg = personalMessageMapper.selectById(messageId);
+        if (msg == null || !msg.getReceiverId().equals(userId)) {
+            throw new BusinessException("消息不存在或无权操作");
+        }
+        if (StrUtil.isBlank(msg.getAttachments())) {
+            throw new BusinessException("该消息没有附件");
+        }
+
+        // 校验 fileId 确实在该消息的附件列表中，防止拿接口转存任意文件
+        boolean belongs = false;
+        try {
+            JSONArray arr = JSONUtil.parseArray(msg.getAttachments());
+            for (Object item : arr) {
+                JSONObject obj = (JSONObject) item;
+                if (fileId.equals(obj.getLong("fileId"))) {
+                    belongs = true;
+                    break;
+                }
+            }
+        } catch (Exception e) {
+            throw new BusinessException("附件数据解析失败");
+        }
+        if (!belongs) {
+            throw new BusinessException("该文件不属于这条消息的附件");
+        }
+
+        // 复用分享转存的引用计数逻辑（同 savePublicShareToMyDisk）
+        File sourceFile = fileMapper.selectById(fileId);
+        if (sourceFile == null || sourceFile.getStatus() == null || sourceFile.getStatus() != 1) {
+            throw new BusinessException("附件原文件已失效（可能已被发送者删除）");
+        }
+        StorageFile storageFile = storageFileMapper.selectById(sourceFile.getStorageId());
+        if (storageFile == null) {
+            throw new BusinessException("物理文件不存在");
+        }
+
+        User currentUser = userMapper.selectById(userId);
+        if (currentUser == null) {
+            throw new BusinessException("当前用户不存在");
+        }
+
+        File existing = fileMapper.selectOne(new LambdaQueryWrapper<File>()
+                .eq(File::getUserId, userId)
+                .eq(File::getFolderId, 0L)
+                .eq(File::getFileName, sourceFile.getFileName())
+                .eq(File::getStatus, 1));
+        if (existing != null) {
+            throw new BusinessException("我的网盘根目录已存在同名文件");
+        }
+
+        File targetFile = new File();
+        targetFile.setFileName(sourceFile.getFileName());
+        targetFile.setStorageId(sourceFile.getStorageId());
+        targetFile.setUserId(userId);
+        targetFile.setFolderId(0L);
+        targetFile.setDownloadCount(0);
+        targetFile.setStatus(1);
+        targetFile.setDeleteTime(null);
+        targetFile.setCreatedAt(LocalDateTime.now());
+        targetFile.setUpdatedAt(LocalDateTime.now());
+        fileMapper.insert(targetFile);
+
+        // 物理文件引用计数 +1（同一份存储，零拷贝）
+        storageFile.setRefCount((storageFile.getRefCount() == null ? 0 : storageFile.getRefCount()) + 1);
+        storageFileMapper.updateById(storageFile);
+
+        // 累加我的已用空间
+        currentUser.setUsedSpace((currentUser.getUsedSpace() == null ? 0L : currentUser.getUsedSpace()) +
+                (storageFile.getFileSize() == null ? 0L : storageFile.getFileSize()));
+        userMapper.updateById(currentUser);
+
+        log.info("用户 [{}] 转存消息附件 {} → 新文件记录 {}", userId, fileId, targetFile.getId());
+        return targetFile.getId();
     }
 
     // ==================== 私有方法 ====================

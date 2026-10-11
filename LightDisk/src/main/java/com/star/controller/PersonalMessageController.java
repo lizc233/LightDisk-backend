@@ -47,4 +47,11 @@ public class PersonalMessageController {
         personalMessageService.deleteMessage(BaseContext.getCurrentId(), messageId);
         return Result.success(null);
     }
+
+    @ApiOperation("把消息附件转存到我的网盘")
+    @PostMapping("/{messageId}/attachments/{fileId}/save")
+    public Result<Long> saveAttachment(@PathVariable Long messageId, @PathVariable Long fileId) {
+        return Result.success(personalMessageService.saveAttachmentToMyDisk(
+                BaseContext.getCurrentId(), messageId, fileId));
+    }
 }

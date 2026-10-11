@@ -14,18 +14,22 @@ import com.star.service.NotificationService;
 import com.star.service.UserContactService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.*;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 /**
  * 通知中心 Service
- * Redis 缓存未读计数 + SQL 持久化双写策略
+ *
+ * 未读数策略（v3）：数据库是唯一事实源，Redis 只做「读穿透缓存」：
+ *   1. 查询：Redis 命中直接返回；未命中→查 DB→回写缓存（短 TTL 兜底）
+ *   2. 任何写入（发私信/分享通知/标记已读/全部已读）→ 立即 evict 对应用户缓存
+ *   3. 管理员发布/撤回/删除公告等全局变更 → evict 全部用户缓存
+ * 不再做 ±1 增量维护（多入口下易失步），因此缓存值永远与数据库一致。
+ * 未读数 = 系统通知未读（LEFT JOIN 已读表，一条 SQL）+ 个人私信未读
  */
 @Slf4j
 @Service
@@ -36,37 +40,52 @@ public class NotificationServiceImpl implements NotificationService {
     private final AnnouncementReadMapper announcementReadMapper;
     private final PersonalMessageMapper personalMessageMapper;
     private final UserMapper userMapper;
-    private final StringRedisTemplate stringRedisTemplate;
     private final UserContactService userContactService;
+    private final org.springframework.data.redis.core.StringRedisTemplate stringRedisTemplate;
 
     private static final String REDIS_KEY_UNREAD = "notification:unread:";
-    private static final long CACHE_EXPIRE_HOURS = 24; // 缓存 24 小时
+    private static final long CACHE_EXPIRE_SECONDS = 30; // 短 TTL 兜底，即使漏 evict 也最多滞后 30s
 
     @Override
     public Map<String, Object> getUnreadCount(Long userId) {
         String redisKey = REDIS_KEY_UNREAD + userId;
 
-        // 1. 优先从 Redis 获取
+        // 1. Redis 读穿透缓存
         String cached = stringRedisTemplate.opsForValue().get(redisKey);
         if (cached != null) {
-            // 格式: "announcementUnread:messageUnread"
             String[] parts = cached.split(":");
-            long aUnread = Long.parseLong(parts[0]);
-            long mUnread = Long.parseLong(parts[1]);
-            return buildUnreadMap(aUnread, mUnread);
+            return buildUnreadMap(Long.parseLong(parts[0]), Long.parseLong(parts[1]));
         }
 
-        // 2. Redis miss → SQL 兜底 + 回写缓存
+        // 2. miss → 查数据库（事实源）→ 回写短缓存
         Map<String, Object> result = calculateUnreadFromDB(userId);
-
-        // 写入 Redis
         long aUnread = (Long) result.get("announcementUnread");
         long mUnread = (Long) result.get("messageUnread");
         stringRedisTemplate.opsForValue().set(redisKey,
                 aUnread + ":" + mUnread,
-                CACHE_EXPIRE_HOURS, TimeUnit.HOURS);
-
+                CACHE_EXPIRE_SECONDS, java.util.concurrent.TimeUnit.SECONDS);
         return result;
+    }
+
+    @Override
+    public void evictUnreadCache(Long userId) {
+        if (userId != null) {
+            stringRedisTemplate.delete(REDIS_KEY_UNREAD + userId);
+        }
+    }
+
+    @Override
+    public void evictAllUnreadCache() {
+        // 用户量级小（课设），SCAN 清理足够；将来量大可改为版本号 key
+        try (org.springframework.data.redis.core.Cursor<String> cursor = stringRedisTemplate.scan(
+                org.springframework.data.redis.core.ScanOptions.scanOptions()
+                        .match(REDIS_KEY_UNREAD + "*").build())) {
+            while (cursor.hasNext()) {
+                stringRedisTemplate.delete(cursor.next());
+            }
+        } catch (Exception e) {
+            log.warn("清理未读缓存失败，等待短 TTL 自然过期", e);
+        }
     }
 
     @Override
@@ -95,7 +114,7 @@ public class NotificationServiceImpl implements NotificationService {
             vo.setItemType("announcement");
             vo.setAnnouncementId(a.getId());
             vo.setTitle(a.getTitle());
-            vo.setContent(a.getContent()); // 可截断
+            vo.setContent(a.getContent());
             vo.setType(a.getType());
             vo.setCreatedAt(a.getCreatedAt());
             vo.setIsRead(readAnnIds.contains(a.getId()));
@@ -155,8 +174,7 @@ public class NotificationServiceImpl implements NotificationService {
         readRecord.setReadAt(LocalDateTime.now());
         announcementReadMapper.insert(readRecord);
 
-        // Redis 未读数 -1
-        decrementUnreadCache(userId, "announcement");
+        evictUnreadCache(userId);
     }
 
     @Override
@@ -166,14 +184,13 @@ public class NotificationServiceImpl implements NotificationService {
         if (msg == null || !msg.getReceiverId().equals(userId)) {
             return;
         }
-        if (msg.getIsRead() == 1) return; // 已读
+        if (msg.getIsRead() != null && msg.getIsRead() == 1) return; // 已读
 
         msg.setIsRead(1);
         msg.setReadAt(LocalDateTime.now());
         personalMessageMapper.updateById(msg);
 
-        // Redis 未读数 -1
-        decrementUnreadCache(userId, "message");
+        evictUnreadCache(userId);
     }
 
     @Override
@@ -205,29 +222,25 @@ public class NotificationServiceImpl implements NotificationService {
                         .eq(PersonalMessage::getIsRead, 0)
         );
 
-        // 3. 清除 Redis 缓存（下次查询会重新计算）
-        stringRedisTemplate.delete(REDIS_KEY_UNREAD + userId);
+        evictUnreadCache(userId);
     }
 
     // ==================== 私有方法 ====================
 
+    /**
+     * 直接查库计算未读数：系统通知（LEFT JOIN 已读表）+ 个人私信
+     */
     private Map<String, Object> calculateUnreadFromDB(Long userId) {
-        // 系统通知未读数：LEFT JOIN ... WHERE read.id IS NULL
-        Long announcementUnread = announcementMapper.selectSystemNotificationsForUser(userId).stream()
-                .filter(a -> announcementReadMapper.selectCount(
-                        new LambdaQueryWrapper<AnnouncementRead>()
-                                .eq(AnnouncementRead::getAnnouncementId, a.getId())
-                                .eq(AnnouncementRead::getUserId, userId)
-                ) == 0).count();
+        Long announcementUnread = announcementMapper.countUnreadSystemNotifications(userId);
 
-        // 个人消息未读数
         Long messageUnread = personalMessageMapper.selectCount(
                 new LambdaQueryWrapper<PersonalMessage>()
                         .eq(PersonalMessage::getReceiverId, userId)
                         .eq(PersonalMessage::getIsRead, 0)
         );
 
-        return buildUnreadMap(announcementUnread, messageUnread);
+        return buildUnreadMap(announcementUnread == null ? 0 : announcementUnread,
+                messageUnread == null ? 0 : messageUnread);
     }
 
     private Map<String, Object> buildUnreadMap(long aUnread, long mUnread) {
@@ -236,46 +249,6 @@ public class NotificationServiceImpl implements NotificationService {
         map.put("messageUnread", mUnread);
         map.put("totalUnread", aUnread + mUnread);
         return map;
-    }
-
-    /**
-     * Redis 未读数 -1（原子操作）
-     */
-    private void decrementUnreadCache(Long userId, String type) {
-        String key = REDIS_KEY_UNREAD + userId;
-        String cached = stringRedisTemplate.opsForValue().get(key);
-        if (cached == null) return; // 无缓存，不处理
-
-        String[] parts = cached.split(":");
-        long aUnread = Long.parseLong(parts[0]);
-        long mUnread = Long.parseLong(parts[1]);
-
-        if ("announcement".equals(type)) {
-            aUnread = Math.max(0, aUnread - 1);
-        } else {
-            mUnread = Math.max(0, mUnread - 1);
-        }
-
-        stringRedisTemplate.opsForValue().set(key,
-                aUnread + ":" + mUnread,
-                CACHE_EXPIRE_HOURS, TimeUnit.HOURS);
-    }
-
-    /**
-     * 增加未读数（发布新通知时调用）
-     */
-    public void incrementUnreadCache(Long userId) {
-        String key = REDIS_KEY_UNREAD + userId;
-        String cached = stringRedisTemplate.opsForValue().get(key);
-        if (cached != null) {
-            String[] parts = cached.split(":");
-            long aUnread = Long.parseLong(parts[0]) + 1;
-            long mUnread = Long.parseLong(parts[1]);
-            stringRedisTemplate.opsForValue().set(key,
-                    aUnread + ":" + mUnread,
-                    CACHE_EXPIRE_HOURS, TimeUnit.HOURS);
-        }
-        // 如果缓存不存在，不需要处理，下次查询时会从 DB 计算
     }
 
     private String getSenderName(Long senderId) {

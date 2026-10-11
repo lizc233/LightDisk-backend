@@ -3,7 +3,7 @@ package com.star.consumer;
 import com.star.config.RabbitMQConfig;
 import com.star.mapper.PersonalMessageMapper;
 import com.star.model.entity.PersonalMessage;
-import com.star.service.impl.NotificationServiceImpl;
+import com.star.service.NotificationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.core.Message;
@@ -27,7 +27,7 @@ import java.util.Map;
 public class ShareNotifyConsumer {
 
     private final PersonalMessageMapper personalMessageMapper;
-    private final NotificationServiceImpl notificationService;
+    private final NotificationService notificationService;
 
     @RabbitListener(queues = RabbitMQConfig.QUEUE_SHARE_VISITED)
     public void handleShareVisited(Map<String, Object> payload, Message message, Channel channel) throws Exception {
@@ -63,8 +63,8 @@ public class ShareNotifyConsumer {
             personalMessageMapper.insert(msg);
             log.info("【分享通知】已向用户 {} 发送分享访问通知", ownerId);
 
-            // Redis 未读数 +1
-            notificationService.incrementUnreadCache(ownerId);
+            // 未读数缓存失效（下次查询从 DB 重算）
+            notificationService.evictUnreadCache(ownerId);
 
             // 手动确认消息
             channel.basicAck(message.getMessageProperties().getDeliveryTag(), false);

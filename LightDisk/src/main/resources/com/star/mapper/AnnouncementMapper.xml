@@ -41,4 +41,17 @@
         ORDER BY is_top DESC, created_at DESC
     </select>
 
+    <!-- 用户未读系统通知数：LEFT JOIN 已读表，无已读记录即未读 -->
+    <select id="countUnreadSystemNotifications" resultType="java.lang.Long">
+        SELECT COUNT(*)
+        FROM announcement a
+        LEFT JOIN announcement_read r
+               ON a.id = r.announcement_id AND r.user_id = #{userId}
+        WHERE a.type = 2
+          AND a.status = 1
+          AND (a.target_type = 0
+               OR (a.target_type = 1 AND FIND_IN_SET(#{userId}, a.target_ids)))
+          AND r.id IS NULL
+    </select>
+
 </mapper>

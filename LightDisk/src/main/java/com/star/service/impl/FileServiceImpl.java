@@ -34,8 +34,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.LocalDateTime;
+import java.util.Collections;
 import java.util.Date;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -308,6 +310,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements IF
                 vo.setUpdateTime(f.getCreatedAt());
                 return vo;
             }).collect(Collectors.toList());
+            fillSizeAndExt(voList);
 
             resultPage.setRecords(voList);
             resultPage.setTotal(filePage.getTotal());
@@ -349,10 +352,48 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements IF
             vo.setUpdateTime(f.getCreatedAt());
             return vo;
         }).collect(Collectors.toList()));
+        fillSizeAndExt(voList.stream().filter(v -> !"folder".equals(v.getType())).collect(Collectors.toList()));
 
         resultPage.setRecords(voList);
         resultPage.setTotal(voList.size());
         return resultPage;
+    }
+
+    /**
+     * 批量补充文件大小与后缀（从 storage_file 物理文件读取）。
+     * 修复：此前组装 FileListVO 漏掉 size，导致消息附件选择器显示 0B。
+     */
+    private void fillSizeAndExt(List<FileListVO> voList) {
+        List<FileListVO> fileVos = voList.stream()
+                .filter(v -> "file".equals(v.getType()) && (v.getSize() == null || v.getExt() == null))
+                .collect(Collectors.toList());
+        if (fileVos.isEmpty()) {
+            return;
+        }
+        // 先按 VO 自身信息找不回来 storageId，改用文件名反查 file 表太绕；
+        // 这里由调用方保证 voList 的顺序语义：改为按 id 批量查 file → storage
+        List<Long> ids = fileVos.stream().map(FileListVO::getId).collect(Collectors.toList());
+        Map<Long, Long> fileToStorage = fileMapper.selectBatchIds(ids).stream()
+                .collect(Collectors.toMap(File::getId, f -> f.getStorageId(), (a, b) -> a));
+        List<Long> storageIds = fileToStorage.values().stream().filter(java.util.Objects::nonNull)
+                .collect(Collectors.toList());
+        Map<Long, StorageFile> storageMap = storageIds.isEmpty()
+                ? Collections.emptyMap()
+                : storageFileMapper.selectBatchIds(storageIds).stream()
+                        .collect(Collectors.toMap(StorageFile::getId, s -> s, (a, b) -> a));
+
+        for (FileListVO vo : fileVos) {
+            Long storageId = fileToStorage.get(vo.getId());
+            StorageFile sf = storageId != null ? storageMap.get(storageId) : null;
+            if (sf != null) {
+                vo.setSize(sf.getFileSize());
+            }
+            String name = vo.getName() == null ? "" : vo.getName();
+            int dot = name.lastIndexOf('.');
+            if (dot >= 0 && dot < name.length() - 1) {
+                vo.setExt(name.substring(dot + 1).toLowerCase());
+            }
+        }
     }
 
     private long defaultLong(Long value) {

@@ -31,6 +31,7 @@ public class AnnouncementServiceImpl implements AnnouncementService {
     private final AnnouncementMapper announcementMapper;
     private final AnnouncementReadMapper announcementReadMapper;
     private final UserMapper userMapper;
+    private final com.star.service.NotificationService notificationService; // 未读缓存失效
 
     @Override
     public Map<String, Object> getAdminAnnouncementList(AnnouncementPageDTO dto) {
@@ -77,11 +78,8 @@ public class AnnouncementServiceImpl implements AnnouncementService {
 
         announcementMapper.insert(entity);
 
-        // 如果是系统通知且目标为全部用户，需要刷新所有用户的 Redis 未读缓存
-        if (entity.getType() == 2 && entity.getTargetType() == 0) {
-            log.info("发布全员系统通知 [{}]，将触发未读缓存更新", entity.getId());
-            // 具体缓存更新在 NotificationCacheService 中处理
-        }
+        // 发布/变更公告影响所有用户未读数 → 全量失效缓存（下次查询从 DB 重算）
+        notificationService.evictAllUnreadCache();
 
         return entity;
     }
@@ -119,6 +117,8 @@ public class AnnouncementServiceImpl implements AnnouncementService {
         // 级联删除已读记录
         announcementReadMapper.delete(new LambdaQueryWrapper<AnnouncementRead>()
                 .eq(AnnouncementRead::getAnnouncementId, id));
+
+        notificationService.evictAllUnreadCache();
     }
 
     @Override

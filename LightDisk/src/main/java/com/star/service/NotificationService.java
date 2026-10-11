@@ -8,7 +8,7 @@ import java.util.Map;
 public interface NotificationService {
 
     /**
-     * 获取当前用户未读统计（Redis 优先，SQL 兜底）
+     * 获取当前用户未读统计（Redis 短缓存，数据库为唯一事实源）
      * 返回 { announcementUnread, messageUnread, totalUnread }
      */
     Map<String, Object> getUnreadCount(Long userId);
@@ -32,4 +32,15 @@ public interface NotificationService {
      * 一键全部已读
      */
     void markAllRead(Long userId);
+
+    /**
+     * 失效指定用户的未读数缓存（任何会产生未读/已读变更的写入方调用，
+     * 下次查询重新从数据库计算，保证与数据库强同步）
+     */
+    void evictUnreadCache(Long userId);
+
+    /**
+     * 失效所有用户的未读数缓存（管理员发布/撤回/删除公告等全局变更时调用）
+     */
+    void evictAllUnreadCache();
 }
