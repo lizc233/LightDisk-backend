@@ -25,6 +25,7 @@ public class AiController {
     private final AiAssistantService aiAssistantService;
     private final AiToolService aiToolService;
     private final AiProperties aiProperties;
+    private final com.star.service.ai.McpToolClient mcpToolClient;
 
     @PostMapping("/chat")
     public Result<AiChatResponseVO> chat(@RequestBody AiChatRequestDTO requestDTO) {
@@ -50,6 +51,10 @@ public class AiController {
         abilities.put("summarizeFile", aiToolService.canSummarize(level));
         abilities.put("editFile", aiToolService.canEdit(level));
         data.put("abilities", abilities);
+        // 阶段 4：标准 MCP 工具服务器（懒启动，这里只探测可用性）
+        boolean mcpUp = mcpToolClient.available();
+        data.put("mcpEnabled", mcpUp);
+        data.put("mcpTools", mcpUp ? mcpToolClient.toolNames() : new java.util.ArrayList<String>());
         return Result.success(data);
     }
 }

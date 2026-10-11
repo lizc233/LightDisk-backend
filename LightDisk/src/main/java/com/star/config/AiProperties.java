@@ -40,8 +40,26 @@ public class AiProperties {
 
     private int maxTokens = 1500;
 
+    /** MCP 工具服务器（阶段 4：Node stdio MCP Server） */
+    private Mcp mcp = new Mcp();
+
     /** 是否具备可用的在线模型能力 */
     public boolean usable() {
         return enabled && StrUtil.isNotBlank(apiKey) && StrUtil.isNotBlank(baseUrl);
+    }
+
+    /** MCP 是否可用（启用即尝试拉起，失败会自动降级本地实现） */
+    public boolean mcpEnabled() {
+        return mcp.isEnabled() && StrUtil.isNotBlank(mcp.getCommand());
+    }
+
+    @Data
+    public static class Mcp {
+        /** 总开关；false 时 AI 全部走 Java 本地工具实现 */
+        private boolean enabled = false;
+        /** 启动命令（一般就是 node） */
+        private String command = "node";
+        /** 服务器脚本及参数 */
+        private java.util.List<String> args = new java.util.ArrayList<String>();
     }
 }

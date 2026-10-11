@@ -77,6 +77,13 @@ lightdisk:
     timeout-ms: 60000
     temperature: 0.3
     max-tokens: 1500
+    # 阶段 4：标准 MCP 工具服务器（Node stdio，官方 @modelcontextprotocol/sdk）
+    # enabled=false 或启动失败时自动降级为 Java 本地工具实现
+    mcp:
+      enabled: true
+      command: node
+      args:
+        - D:/AI_LightDisk/LightDisk/lightdisk-mcp-server/server.js
   notification:
     # 未读数：待落库队列刷盘间隔 / 全量对账间隔（毫秒）
     flush-interval: 2000

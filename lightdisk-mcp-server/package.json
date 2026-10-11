@@ -1,0 +1,14 @@
+{
+  "name": "lightdisk-mcp-server",
+  "version": "1.0.0",
+  "description": "LightDisk AI Agent 的标准 MCP (Model Context Protocol) 工具服务器，stdio 传输",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "zod": "^3.23.8"
+  }
+}

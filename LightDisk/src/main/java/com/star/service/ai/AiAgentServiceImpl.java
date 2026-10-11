@@ -59,6 +59,7 @@ public class AiAgentServiceImpl implements AiAssistantService {
     private final AiToolService toolService;
     private final LlmClient llmClient;
     private final AiProperties aiProperties;
+    private final McpToolClient mcpToolClient;
 
     @Override
     public AiChatResponseVO chat(Long userId, AiChatRequestDTO requestDTO) {
@@ -106,6 +107,7 @@ public class AiAgentServiceImpl implements AiAssistantService {
         String toolStageDetail = "未调用工具（通用问答）";
         AiSourceVO toolSource = null;
         String editSummary = null;
+        boolean mcpUsed = false;
 
         if (deny == null) {
             if ("LOCATE".equals(plan.intent)) {
@@ -192,16 +194,24 @@ public class AiAgentServiceImpl implements AiAssistantService {
             String llmAnswer = synthesize(query, plan, toolResults, base);
             answer = StrUtil.isBlank(llmAnswer) ? base.getAnswer() : llmAnswer;
         } else if ("SUMMARIZE".equals(plan.intent) && hasFileContent(toolResults)) {
-            // 离线也要能用：内容已经读进来了，这里做本地抽取式摘要（不编造、不调用模型）
-            answer = localSummary(toolResults);
+            // 离线也要能用：优先走 MCP 工具（标准协议、确定性抽取），不可用再回落本地摘要
+            Map<String, Object> read = firstReadable(toolResults);
+            String mcpSummary = summarizeViaMcp(read);
+            if (mcpSummary != null) {
+                answer = mcpSummary;
+                mcpUsed = true;
+            } else {
+                answer = localSummary(toolResults);
+            }
         } else {
             answer = str(base.getAnswer()) + "\n\n（提示：当前为离线规则引擎模式，回答来自本地检索，未调用大模型。）";
         }
         stages.add(stage("generate", "回答生成", online && deny == null
                 ? "模型 " + aiProperties.getModel() + " 基于工具结果生成"
                 : (deny != null ? "返回权限提示"
+                : (mcpUsed ? "MCP 工具 extractive_summary 抽取式摘要（标准 MCP 协议调用 Node 工具服务器）"
                 : ("SUMMARIZE".equals(plan.intent) && hasFileContent(toolResults)
-                        ? "本地抽取式摘要（离线，不调用模型）" : "内置规则引擎生成"))));
+                        ? "本地抽取式摘要（MCP 不可用，降级内置实现）" : "内置规则引擎生成")))));
 
         // ==================== ⑤ 复核 Agent ====================
         AiCriticVO critic = review(query, answer, toolResults, plan, deny, online);
@@ -423,6 +433,9 @@ public class AiAgentServiceImpl implements AiAssistantService {
             Matcher matcher = FILE_NAME_PATTERN.matcher(str(answer));
             while (matcher.find()) {
                 String mentioned = matcher.group();
+                if (isLikelyVersionToken(mentioned)) {
+                    continue; // 版本号（如 Spring Boot 2.7、v1.0）不是文件名，跳过
+                }
                 if (!knownNames.contains(mentioned) && !mentioned.contains("examples") ) {
                     issues.add("回答提到未检索到的文件「" + mentioned + "」，疑似幻觉");
                     break;
@@ -485,8 +498,14 @@ public class AiAgentServiceImpl implements AiAssistantService {
         return critic;
     }
 
-    private Set<String> collectKnownNames(List<Map<String, Object>> toolResults) {
-        Set<String> names = new LinkedHashSet<String>();
+    /** 形如 "2.7" / "v1.0.0" 的版本号：点后不是纯字母扩展名的，不算文件名 */
+    private boolean isLikelyVersionToken(String token) {
+        int dot = token.lastIndexOf('.');
+        String ext = dot >= 0 ? token.substring(dot + 1) : "";
+        return !ext.matches("[A-Za-z]{2,}");
+    }
+
+    private Set<String> collectKnownNames(List<Map<String, Object>> toolResults) {        Set<String> names = new LinkedHashSet<String>();
         for (Map<String, Object> result : toolResults) {
             Object items = result.get("items");
             if (items instanceof List) {
@@ -516,6 +535,41 @@ public class AiAgentServiceImpl implements AiAssistantService {
             }
         }
         return false;
+    }
+
+    private Map<String, Object> firstReadable(List<Map<String, Object>> toolResults) {
+        for (Map<String, Object> result : toolResults) {
+            if (Boolean.TRUE.equals(result.get("readable")) && result.get("content") != null) {
+                return result;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 通过标准 MCP 协议调用 Node 工具服务器的 extractive_summary（阶段 4 亮点）。
+     * 失败返回 null，由调用方降级为本地摘要。
+     */
+    private String summarizeViaMcp(Map<String, Object> read) {
+        if (read == null || !mcpToolClient.available()) {
+            return null;
+        }
+        try {
+            Map<String, Object> args = new LinkedHashMap<String, Object>();
+            args.put("text", String.valueOf(read.get("content")));
+            Object fileName = read.get("fileName");
+            args.put("title", fileName == null ? "" : String.valueOf(fileName));
+            args.put("maxSentences", 4);
+            String text = mcpToolClient.callTool("extractive_summary", args);
+            if (StrUtil.isBlank(text)) {
+                return null;
+            }
+            return text + "\n\n（本摘要由 MCP 工具 extractive_summary 生成：只抽取原文句子，不生成新内容，杜绝幻觉。"
+                    + "配置 DeepSeek API Key 后可升级为模型语义摘要。）";
+        } catch (Exception e) {
+            log.warn("[AI] MCP 摘要失败，回落本地实现: {}", e.getMessage());
+            return null;
+        }
     }
 
     /**
