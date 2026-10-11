@@ -41,7 +41,7 @@ public class AnnouncementServiceImpl implements AnnouncementService {
         if (dto.getStatus() != null) {
             wrapper.eq(Announcement::getStatus, dto.getStatus());
         }
-        if (dto.getKeyword() != null && !dto.getKeyword().isBlank()) {
+        if (dto.getKeyword() != null && !dto.getKeyword().trim().isEmpty()) {
             wrapper.like(Announcement::getTitle, dto.getKeyword().trim());
         }
         wrapper.orderByDesc(Announcement::getIsTop);

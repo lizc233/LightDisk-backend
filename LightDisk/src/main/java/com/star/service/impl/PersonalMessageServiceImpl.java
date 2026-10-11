@@ -51,13 +51,13 @@ public class PersonalMessageServiceImpl implements PersonalMessageService {
     @Override
     @Transactional
     public List<PersonalMessage> sendPersonalMessage(Long senderId, PersonalMessageSendDTO dto) {
-        if (dto.getReceiverIds() == null || dto.getReceiverIds().isBlank()) {
+        if (dto.getReceiverIds() == null || dto.getReceiverIds().trim().isEmpty()) {
             throw new BusinessException("接收者ID不能为空");
         }
-        if (dto.getTitle() == null || dto.getTitle().isBlank()) {
+        if (dto.getTitle() == null || dto.getTitle().trim().isEmpty()) {
             throw new BusinessException("消息标题不能为空");
         }
-        if (dto.getContent() == null || dto.getContent().isBlank()) {
+        if (dto.getContent() == null || dto.getContent().trim().isEmpty()) {
             throw new BusinessException("消息内容不能为空");
         }
 
