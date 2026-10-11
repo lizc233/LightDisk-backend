@@ -2,10 +2,14 @@
 -- LightDisk 管理员账号初始化 / 修复脚本
 -- 适用：本地、cloudstudio.net 线上库均可执行
 -- 目标账号：admin / 123456（管理员）
+--
+-- 说明：管理员身份统一用 user.is_admin 字段判定（1=管理员）。
+--       云端 schema.sql 里原本没有该字段，本脚本负责补上。
+--       本脚本幂等，可重复执行。
 -- ============================================================
 
--- 【第一步】确保 user 表存在 is_admin 字段（老库可能没有）
--- 若字段已存在，MySQL 8 会报 1060 错误，可忽略。
+-- 【第一步】确保 user 表存在 is_admin 字段（老库/云端 schema.sql 都没有）
+-- 若字段已存在，MySQL 会报 1060 错误，可忽略，继续执行下面的语句。
 ALTER TABLE `user`
   ADD COLUMN `is_admin` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '0-普通用户 1-管理员';
 
