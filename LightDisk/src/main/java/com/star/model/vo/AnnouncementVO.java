@@ -14,6 +14,10 @@ public class AnnouncementVO {
     private String content;
     /** 类型：1-公告 2-系统通知 */
     private Integer type;
+    /** 目标：0-全部用户 1-指定用户 2-指定VIP等级 */
+    private Integer targetType;
+    /** targetType=1 用户ID列表；=2 VIP等级列表（逗号分隔） */
+    private String targetIds;
     /** 是否置顶 */
     private Integer isTop;
     /** 状态 */

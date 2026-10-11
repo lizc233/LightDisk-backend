@@ -65,6 +65,7 @@ public class AnnouncementServiceImpl implements AnnouncementService {
     @Override
     @Transactional
     public Announcement create(AnnouncementDTO dto) {
+        validateTarget(dto);
         Announcement entity = new Announcement();
         entity.setTitle(dto.getTitle());
         entity.setContent(dto.getContent());
@@ -90,6 +91,7 @@ public class AnnouncementServiceImpl implements AnnouncementService {
         if (dto.getId() == null) {
             throw new BusinessException("公告ID不能为空");
         }
+        validateTarget(dto);
         Announcement existing = announcementMapper.selectById(dto.getId());
         if (existing == null) {
             throw new BusinessException("公告不存在");
@@ -149,7 +151,8 @@ public class AnnouncementServiceImpl implements AnnouncementService {
 
     @Override
     public Map<String, Object> getSystemNotificationsForUser(Long userId, Integer pageNum, Integer pageSize) {
-        List<Announcement> notifications = announcementMapper.selectSystemNotificationsForUser(userId);
+        List<Announcement> notifications =
+                announcementMapper.selectSystemNotificationsForUser(userId, effectiveVipLevel(userId));
 
         // 查询该用户已读的通知 ID 集合
         Set<Long> readIds = announcementReadMapper.selectList(
@@ -179,12 +182,55 @@ public class AnnouncementServiceImpl implements AnnouncementService {
         return data;
     }
 
+    /**
+     * 校验定向目标：
+     * targetType 0-全部用户 1-指定用户（targetIds=用户ID逗号分隔） 2-指定VIP等级（targetIds=等级逗号分隔）
+     */
+    private void validateTarget(AnnouncementDTO dto) {
+        Integer targetType = dto.getTargetType();
+        if (targetType == null || targetType == 0) {
+            return;
+        }
+        if (dto.getTargetIds() == null || dto.getTargetIds().trim().isEmpty()) {
+            throw new BusinessException("定向发布时必须选择目标");
+        }
+        String[] parts = dto.getTargetIds().split(",");
+        for (String part : parts) {
+            String item = part.trim();
+            if (item.isEmpty() || !item.matches("\\d{1,18}")) {
+                throw new BusinessException("定向目标格式不正确");
+            }
+            if (targetType == 2) {
+                int level = Integer.parseInt(item);
+                if (level < 0 || level > 9) {
+                    throw new BusinessException("VIP等级不合法");
+                }
+            }
+        }
+    }
+
+    /**
+     * 用户的「生效VIP等级」：VIP 已过期按普通用户(0)算，与后台管理页口径一致
+     */
+    private Integer effectiveVipLevel(Long userId) {
+        User user = userMapper.selectById(userId);
+        if (user == null || user.getRole() == null || user.getRole() <= 0) {
+            return 0;
+        }
+        if (user.getVipExpireTime() == null || !user.getVipExpireTime().isAfter(LocalDateTime.now())) {
+            return 0;
+        }
+        return user.getRole();
+    }
+
     private AnnouncementVO toVO(Announcement entity) {
         AnnouncementVO vo = new AnnouncementVO();
         vo.setId(entity.getId());
         vo.setTitle(entity.getTitle());
         vo.setContent(entity.getContent());
         vo.setType(entity.getType());
+        vo.setTargetType(entity.getTargetType());
+        vo.setTargetIds(entity.getTargetIds());
         vo.setIsTop(entity.getIsTop());
         vo.setStatus(entity.getStatus());
         vo.setCreatedAt(entity.getCreatedAt());

@@ -1,6 +1,7 @@
 package com.star.service.impl;
 
 import cn.hutool.core.util.StrUtil;
+import cn.hutool.crypto.digest.DigestUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -10,7 +11,9 @@ import com.star.mapper.FolderMapper;
 import com.star.mapper.ShareMapper;
 import com.star.mapper.UserMapper;
 import com.star.mapper.VipConfigMapper;
+import com.star.model.dto.AdminUserCreateDTO;
 import com.star.model.dto.AdminUserPageDTO;
+import com.star.model.dto.AdminUserRoleUpdateDTO;
 import com.star.model.dto.AdminUserStatusUpdateDTO;
 import com.star.model.dto.AdminUserVipUpdateDTO;
 import com.star.model.entity.File;
@@ -18,6 +21,7 @@ import com.star.model.entity.Folder;
 import com.star.model.entity.Share;
 import com.star.model.entity.User;
 import com.star.model.entity.VipConfig;
+import com.star.model.vo.UserSimpleVO;
 import com.star.service.AdminService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -40,6 +44,8 @@ public class AdminServiceImpl implements AdminService {
     private static final int DEFAULT_VIP_DURATION_DAYS = 365;
     private static final int RECYCLE_RETENTION_DAYS = 30;
     private static final int RECYCLE_REMINDER_DAYS = 3;
+
+    private static final String STATIC_SALT = "LightDisk_Star_#2026";
 
     private final UserMapper userMapper;
     private final VipConfigMapper vipConfigMapper;
@@ -173,10 +179,14 @@ public class AdminServiceImpl implements AdminService {
         if (adminUser.getId().equals(user.getId()) && dto.getStatus() == 0) {
             throw new BusinessException("不能禁用当前管理员账号");
         }
-        if (safeInt(user.getIsAdmin()) == 1 && dto.getStatus() == 0) {
+        // 普通管理员(1)不能操作任何管理员账号，只有超级管理员(2)可以
+        if (safeInt(adminUser.getIsAdmin()) < 2 && safeInt(user.getIsAdmin()) >= 1) {
+            throw new BusinessException("普通管理员不能操作管理员账号，请联系超级管理员");
+        }
+        if (safeInt(user.getIsAdmin()) >= 1 && dto.getStatus() == 0) {
             long enabledAdminCount = safeCount(userMapper.selectCount(
                     new LambdaQueryWrapper<User>()
-                            .eq(User::getIsAdmin, 1)
+                            .gt(User::getIsAdmin, 0)
                             .eq(User::getStatus, 1)
             ));
             if (enabledAdminCount <= 1) {
@@ -190,13 +200,131 @@ public class AdminServiceImpl implements AdminService {
         return buildUserRow(user, loadVipConfigMap(), LocalDateTime.now());
     }
 
+    @Override
+    public List<UserSimpleVO> searchUsers(Long adminUserId, String keyword) {
+        ensureAdmin(adminUserId);
+        if (StrUtil.isBlank(keyword)) {
+            throw new BusinessException("请输入搜索关键词");
+        }
+        String kw = StrUtil.trim(keyword);
+        LambdaQueryWrapper<User> wrapper = new LambdaQueryWrapper<User>()
+                .and(item -> item.like(User::getUsername, kw).or().like(User::getEmail, kw))
+                .orderByAsc(User::getId)
+                .last("LIMIT 10");
+        return userMapper.selectList(wrapper).stream().map(u -> {
+            UserSimpleVO vo = new UserSimpleVO();
+            vo.setId(u.getId());
+            vo.setUsername(u.getUsername());
+            vo.setAdminRole(safeInt(u.getIsAdmin()));
+            return vo;
+        }).collect(Collectors.toList());
+    }
+
+    @Override
+    public List<Map<String, Object>> getVipOptions(Long adminUserId) {
+        ensureAdmin(adminUserId);
+        return buildVipOptions();
+    }
+
+    @Override
+    public Map<String, Object> addUser(Long operatorId, AdminUserCreateDTO dto) {
+        ensureSuperAdmin(operatorId);
+        if (dto == null || StrUtil.isBlank(dto.getUsername())) {
+            throw new BusinessException("请输入用户名");
+        }
+        String username = dto.getUsername().trim();
+        if (!username.matches("^[a-zA-Z0-9_\\u4e00-\\u9fa5]{2,32}$")) {
+            throw new BusinessException("用户名需为 2-32 位字母/数字/下划线/中文");
+        }
+        if (StrUtil.isBlank(dto.getPassword())) {
+            throw new BusinessException("请输入初始密码");
+        }
+        if (dto.getPassword().length() < 6 || dto.getPassword().length() > 20) {
+            throw new BusinessException("密码长度需在 6 到 20 位之间");
+        }
+        int vipRole = dto.getVipRole() == null ? 0 : dto.getVipRole();
+        int adminRole = dto.getIsAdmin() == null ? 0 : dto.getIsAdmin();
+        if (vipRole < 0 || vipRole > 9 || adminRole < 0 || adminRole > 2) {
+            throw new BusinessException("等级或身份不合法");
+        }
+        Long exists = userMapper.selectCount(new LambdaQueryWrapper<User>().eq(User::getUsername, username));
+        if (exists != null && exists > 0) {
+            throw new BusinessException("用户名已存在");
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        User user = new User();
+        user.setUsername(username);
+        user.setPassword(DigestUtil.md5Hex(dto.getPassword() + username + STATIC_SALT));
+        user.setEmail(StrUtil.isBlank(dto.getEmail()) ? null : dto.getEmail().trim());
+        user.setRole(vipRole);
+        if (vipRole > 0) {
+            user.setVipExpireTime(now.plusDays(DEFAULT_VIP_DURATION_DAYS));
+        }
+        user.setIsAdmin(adminRole);
+        user.setStatus(1);
+        user.setUsedSpace(0L);
+        user.setCreatedAt(now);
+        user.setUpdatedAt(now);
+        userMapper.insert(user);
+
+        return buildUserRow(user, loadVipConfigMap(), now);
+    }
+
+    @Override
+    public Map<String, Object> updateUserRole(Long operatorId, AdminUserRoleUpdateDTO dto) {
+        User operator = ensureSuperAdmin(operatorId);
+        if (dto == null || dto.getUserId() == null) {
+            throw new BusinessException("请选择要操作的用户");
+        }
+        if (dto.getIsAdmin() == null || dto.getIsAdmin() < 0 || dto.getIsAdmin() > 2) {
+            throw new BusinessException("身份仅支持 0-普通用户 / 1-管理员 / 2-超级管理员");
+        }
+        User user = loadUser(dto.getUserId());
+        if (operator.getId().equals(user.getId())) {
+            throw new BusinessException("不能修改自己的身份，防止权限锁死");
+        }
+
+        int before = safeInt(user.getIsAdmin());
+        int after = dto.getIsAdmin();
+        // 减少管理员数量时，保证系统至少保留一个可用管理员
+        if (before >= 1 && after < 1 && safeInt(user.getStatus()) == 1) {
+            long enabledAdminCount = safeCount(userMapper.selectCount(
+                    new LambdaQueryWrapper<User>()
+                            .gt(User::getIsAdmin, 0)
+                            .eq(User::getStatus, 1)
+                            .ne(User::getId, user.getId())
+            ));
+            if (enabledAdminCount < 1) {
+                throw new BusinessException("系统至少需要保留一个可用管理员账号");
+            }
+        }
+
+        user.setIsAdmin(after);
+        user.setUpdatedAt(LocalDateTime.now());
+        userMapper.updateById(user);
+        return buildUserRow(user, loadVipConfigMap(), LocalDateTime.now());
+    }
+
     private User ensureAdmin(Long adminUserId) {
         User user = loadUser(adminUserId);
         if (safeInt(user.getStatus()) == 0) {
             throw new BusinessException("账号已被禁用");
         }
-        if (safeInt(user.getIsAdmin()) != 1) {
+        if (safeInt(user.getIsAdmin()) < 1) {
             throw new BusinessException("无管理员权限");
+        }
+        return user;
+    }
+
+    /**
+     * 超级管理员（is_admin=2）专用校验：只有超级管理员可以添加用户、修改用户身份。
+     * 普通管理员（is_admin=1）仅可发通知、查看用户数据、调整VIP等级、禁用/启用账号。
+     */
+    private User ensureSuperAdmin(Long adminUserId) {
+        User user = ensureAdmin(adminUserId);
+        if (safeInt(user.getIsAdmin()) < 2) {
+            throw new BusinessException("该操作仅超级管理员可执行");
         }
         return user;
     }

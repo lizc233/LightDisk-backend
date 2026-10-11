@@ -1,6 +1,7 @@
 package com.star.config;
 
 import com.github.xiaoymin.knife4j.spring.annotations.EnableKnife4j;
+import com.star.interceptor.AdminAuthInterceptor;
 import com.star.interceptor.JwtTokenInterceptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
@@ -21,8 +22,12 @@ public class WebMvcConfiguration extends WebMvcConfigurationSupport {
     @Autowired
     private JwtTokenInterceptor jwtTokenInterceptor;
 
+    @Autowired
+    private AdminAuthInterceptor adminAuthInterceptor;
+
     @Override
     protected void addInterceptors(InterceptorRegistry registry) {
+        // 1) 登录校验：解析 JWT，把 userId 放进 ThreadLocal
         registry.addInterceptor(jwtTokenInterceptor)
                 .addPathPatterns("/api/**")
                 .excludePathPatterns(
@@ -33,6 +38,9 @@ public class WebMvcConfiguration extends WebMvcConfigurationSupport {
                         "/api/share/public/*",
                         "/api/share/public/*/download"
                 );
+        // 2) 管理员二次鉴权：/api/admin/** 要求 is_admin >= 1（防止普通用户越权调用管理接口）
+        registry.addInterceptor(adminAuthInterceptor)
+                .addPathPatterns("/api/admin/**");
     }
 
     @Bean

@@ -324,7 +324,8 @@ public class NotificationServiceImpl implements NotificationService {
         int size = (pageSize == null || pageSize < 1) ? 10 : pageSize;
 
         // 获取系统通知（含已读状态）
-        List<Announcement> notifications = announcementMapper.selectSystemNotificationsForUser(userId);
+        List<Announcement> notifications =
+                announcementMapper.selectSystemNotificationsForUser(userId, effectiveVipLevel(userId));
         Set<Long> readAnnIds = announcementReadMapper.selectList(
                 new LambdaQueryWrapper<AnnouncementRead>().eq(AnnouncementRead::getUserId, userId)
         ).stream().map(AnnouncementRead::getAnnouncementId).collect(Collectors.toSet());
@@ -512,7 +513,8 @@ public class NotificationServiceImpl implements NotificationService {
     /** 一键全部已读落库 */
     private void doPersistAllRead(Long userId) {
         // 1. 标记所有未读系统通知为已读
-        List<Announcement> allNotifications = announcementMapper.selectSystemNotificationsForUser(userId);
+        List<Announcement> allNotifications =
+                announcementMapper.selectSystemNotificationsForUser(userId, effectiveVipLevel(userId));
         Set<Long> existingReadIds = announcementReadMapper.selectList(
                 new LambdaQueryWrapper<AnnouncementRead>().eq(AnnouncementRead::getUserId, userId)
         ).stream().map(AnnouncementRead::getAnnouncementId).collect(Collectors.toSet());
@@ -540,10 +542,25 @@ public class NotificationServiceImpl implements NotificationService {
     // ==================== 私有工具方法 ====================
 
     /**
+     * 用户的「生效VIP等级」：VIP 过期按普通用户(0)算（与后台管理页口径一致），
+     * 用于系统通知的「指定VIP等级」定向过滤
+     */
+    private Integer effectiveVipLevel(Long userId) {
+        com.star.model.entity.User user = userMapper.selectById(userId);
+        if (user == null || user.getRole() == null || user.getRole() <= 0) {
+            return 0;
+        }
+        if (user.getVipExpireTime() == null || !user.getVipExpireTime().isAfter(LocalDateTime.now())) {
+            return 0;
+        }
+        return user.getRole();
+    }
+
+    /**
      * 直接查库计算未读数：系统通知（LEFT JOIN 已读表）+ 个人私信
      */
     private Map<String, Object> calculateUnreadFromDB(Long userId) {
-        Long announcementUnread = announcementMapper.countUnreadSystemNotifications(userId);
+        Long announcementUnread = announcementMapper.countUnreadSystemNotifications(userId, effectiveVipLevel(userId));
 
         Long messageUnread = personalMessageMapper.selectCount(
                 new LambdaQueryWrapper<PersonalMessage>()

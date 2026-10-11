@@ -17,12 +17,14 @@ public interface AnnouncementMapper extends BaseMapper<Announcement> {
     List<Announcement> selectSidebarAnnouncements();
 
     /**
-     * 查询用户可见的系统通知（type=2, 已发布, 全员或指定给该用户的）
+     * 查询用户可见的系统通知（type=2, 已发布, 全员/指定用户/指定VIP等级）
      */
-    List<Announcement> selectSystemNotificationsForUser(@Param("userId") Long userId);
+    List<Announcement> selectSystemNotificationsForUser(@Param("userId") Long userId,
+                                                        @Param("vipLevel") Integer vipLevel);
 
     /**
      * 统计用户未读的系统通知数（LEFT JOIN 已读表，一条 SQL 完成，实时准确）
      */
-    Long countUnreadSystemNotifications(@Param("userId") Long userId);
+    Long countUnreadSystemNotifications(@Param("userId") Long userId,
+                                        @Param("vipLevel") Integer vipLevel);
 }

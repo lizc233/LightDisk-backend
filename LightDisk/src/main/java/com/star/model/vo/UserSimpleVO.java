@@ -16,6 +16,9 @@ public class UserSimpleVO {
     /** 是否为管理员账号 */
     private Boolean isAdmin;
 
+    /** 身份：0-普通用户 1-管理员 2-超级管理员（管理员搜索接口返回） */
+    private Integer adminRole;
+
     /** 当前登录用户是否已把 TA 加为联系人 */
     private Boolean isContact;
 

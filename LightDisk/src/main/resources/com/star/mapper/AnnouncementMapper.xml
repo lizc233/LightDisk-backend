@@ -37,7 +37,8 @@
         WHERE type = 2
           AND status = 1
           AND (target_type = 0
-               OR (target_type = 1 AND FIND_IN_SET(#{userId}, target_ids)))
+               OR (target_type = 1 AND FIND_IN_SET(#{userId}, target_ids))
+               OR (target_type = 2 AND #{vipLevel} IS NOT NULL AND FIND_IN_SET(#{vipLevel}, target_ids)))
         ORDER BY is_top DESC, created_at DESC
     </select>
 
@@ -50,7 +51,8 @@
         WHERE a.type = 2
           AND a.status = 1
           AND (a.target_type = 0
-               OR (a.target_type = 1 AND FIND_IN_SET(#{userId}, a.target_ids)))
+               OR (a.target_type = 1 AND FIND_IN_SET(#{userId}, a.target_ids))
+               OR (a.target_type = 2 AND #{vipLevel} IS NOT NULL AND FIND_IN_SET(#{vipLevel}, a.target_ids)))
           AND r.id IS NULL
     </select>
 
