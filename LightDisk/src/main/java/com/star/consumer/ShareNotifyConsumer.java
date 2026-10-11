@@ -63,8 +63,8 @@ public class ShareNotifyConsumer {
             personalMessageMapper.insert(msg);
             log.info("【分享通知】已向用户 {} 发送分享访问通知", ownerId);
 
-            // 未读数缓存失效（下次查询从 DB 重算）
-            notificationService.evictUnreadCache(ownerId);
+            // Redis 未读计数 +1（缓存命中时原子递增）
+            notificationService.onNewMessage(ownerId);
 
             // 手动确认消息
             channel.basicAck(message.getMessageProperties().getDeliveryTag(), false);

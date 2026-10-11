@@ -34,8 +34,19 @@ public interface NotificationService {
     void markAllRead(Long userId);
 
     /**
-     * 失效指定用户的未读数缓存（任何会产生未读/已读变更的写入方调用，
-     * 下次查询重新从数据库计算，保证与数据库强同步）
+     * 新未读产生时（收到新私信/分享通知等）递增接收者的 Redis 未读计数。
+     * 只在缓存命中时原子 +1；未命中则留待下次读取按数据库物化，避免重复计数。
+     */
+    void onNewMessage(Long receiverId);
+
+    /**
+     * 以数据库为准，对账并覆盖该用户的 Redis 未读计数（登录时调用）。
+     * 会先尽量刷盘待落库操作，再按数据库重算，修复任何长期偏移。
+     */
+    void reconcileUnread(Long userId);
+
+    /**
+     * 失效指定用户的未读数缓存（下次查询重新从数据库计算）
      */
     void evictUnreadCache(Long userId);
 

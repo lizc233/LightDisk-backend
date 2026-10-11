@@ -65,6 +65,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
     private final FileMapper fileMapper;
     private final FolderMapper folderMapper;
     private final ObjectProvider<JavaMailSender> mailSenderProvider;
+    private final com.star.service.NotificationService notificationService;
 
     @Value("${lightdisk.mail.enabled:false}")
     private boolean mailEnabled;
@@ -97,6 +98,13 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         VipConfig vipConfig = getVipConfig(user.getRole());
         String token = jwtUtils.createAccessToken(user.getId(), user.getUsername());
         redisTemplate.opsForValue().set("auth:token:" + user.getId(), token, 2, TimeUnit.HOURS);
+
+        // 登录时以数据库为准对账未读计数（Redis 计数的强同步兜底）
+        try {
+            notificationService.reconcileUnread(user.getId());
+        } catch (Exception e) {
+            log.warn("[登录] 未读数对账失败（不影响登录）uid={}", user.getId(), e);
+        }
 
         return LoginVO.builder()
                 .id(user.getId())

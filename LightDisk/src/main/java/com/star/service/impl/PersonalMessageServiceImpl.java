@@ -168,8 +168,8 @@ public class PersonalMessageServiceImpl implements PersonalMessageService {
             personalMessageMapper.insert(msg);
             messages.add(msg);
 
-            // 未读数缓存失效（下次查询从 DB 重算，保证与数据库同步）
-            notificationService.evictUnreadCache(receiverId);
+            // Redis 未读计数 +1（缓存命中时原子递增，未命中留待读时按 DB 物化）
+            notificationService.onNewMessage(receiverId);
 
             // 可选：顺手加为联系人
             if (autoAddContact && !userContactService.isContact(senderId, receiverId)) {
