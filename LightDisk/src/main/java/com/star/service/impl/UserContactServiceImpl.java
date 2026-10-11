@@ -51,20 +51,20 @@ public class UserContactServiceImpl implements UserContactService {
         String raw = keyword.trim();
         final String kw = raw.length() > 50 ? raw.substring(0, 50) : raw;
 
+        // 隐私保护（邮件式）：只做「精确确认」，不做模糊推荐——
+        // 纯数字按用户 ID 精确命中；否则用户名需完全相等。
+        // 任何情况下最多返回 1 条，避免用前缀/片段枚举其他用户。
         LambdaQueryWrapper<User> wrapper = new LambdaQueryWrapper<>();
         wrapper.ne(User::getId, currentUserId);
         // status：1-正常 0-停用，null 视为正常
         wrapper.and(w -> w.eq(User::getStatus, 1).or().isNull(User::getStatus));
 
         if (kw.matches("\\d+")) {
-            // 纯数字：ID 精确命中排最前，同时兼容用户名包含该串
-            Long id = Long.parseLong(kw);
-            wrapper.and(w -> w.eq(User::getId, id).or().like(User::getUsername, kw));
+            wrapper.eq(User::getId, Long.parseLong(kw));
         } else {
-            wrapper.like(User::getUsername, kw);
+            wrapper.eq(User::getUsername, kw);
         }
-        wrapper.orderByAsc(User::getId);
-        wrapper.last("LIMIT " + SEARCH_LIMIT);
+        wrapper.last("LIMIT 2");
 
         List<User> users = userMapper.selectList(wrapper);
         if (users.isEmpty()) {

@@ -30,6 +30,13 @@ public class PersonalMessage {
     /** 消息内容 */
     private String content;
 
+    /**
+     * 附件 JSON 数组字符串，元素结构：
+     * [{"fileId":123,"name":"报告.pdf","size":102400,"type":"pdf"}]
+     * fileId 指向发送者网盘文件（file 表），预留接收者转存/下载扩展
+     */
+    private String attachments;
+
     /** 类型：1-系统自动 2-管理员私信 3-分享通知 */
     private Integer messageType;
 

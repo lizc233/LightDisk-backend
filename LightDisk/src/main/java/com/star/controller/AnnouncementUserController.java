@@ -28,4 +28,11 @@ public class AnnouncementUserController {
     public Result<List<Announcement>> getSidebarAnnouncements() {
         return Result.success(announcementService.getSidebarAnnouncements());
     }
+
+    @ApiOperation("获取最近公告+系统通知（混合，置顶优先，默认3条）")
+    @GetMapping("/recent")
+    public Result<List<Announcement>> getRecentAnnouncements(
+            @org.springframework.web.bind.annotation.RequestParam(defaultValue = "3") Integer limit) {
+        return Result.success(announcementService.getRecentAnnouncements(limit));
+    }
 }

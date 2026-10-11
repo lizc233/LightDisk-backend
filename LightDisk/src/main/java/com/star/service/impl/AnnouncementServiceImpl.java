@@ -138,6 +138,16 @@ public class AnnouncementServiceImpl implements AnnouncementService {
     }
 
     @Override
+    public List<Announcement> getRecentAnnouncements(int limit) {
+        int safeLimit = Math.min(Math.max(limit, 1), 10);
+        return announcementMapper.selectList(new LambdaQueryWrapper<Announcement>()
+                .eq(Announcement::getStatus, 1)
+                .orderByDesc(Announcement::getIsTop)
+                .orderByDesc(Announcement::getCreatedAt)
+                .last("LIMIT " + safeLimit));
+    }
+
+    @Override
     public Map<String, Object> getSystemNotificationsForUser(Long userId, Integer pageNum, Integer pageSize) {
         List<Announcement> notifications = announcementMapper.selectSystemNotificationsForUser(userId);
 

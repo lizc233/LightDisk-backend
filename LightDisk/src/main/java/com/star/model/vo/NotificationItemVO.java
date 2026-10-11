@@ -30,6 +30,8 @@ public class NotificationItemVO {
     /** 1-系统自动 2-管理员私信 3-分享通知 4-用户私信 */
     private Integer messageType;
     private Long relatedId;
+    /** 附件 JSON 数组字符串（仅个人消息，可为 null） */
+    private String attachments;
     /** 发送者是否为当前用户的联系人（用于区分陌生消息） */
     private Boolean senderIsContact;
 

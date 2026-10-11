@@ -18,6 +18,8 @@ public class PersonalMessageVO {
     private Boolean senderIsContact;
     private String title;
     private String content;
+    /** 附件 JSON 数组字符串（可为 null），结构见 PersonalMessage#attachments */
+    private String attachments;
     /** 类型：1-系统自动 2-管理员私信 3-分享通知 4-用户私信 */
     private Integer messageType;
     /** 关联ID */

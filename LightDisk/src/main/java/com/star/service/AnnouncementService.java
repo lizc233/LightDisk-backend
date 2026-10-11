@@ -44,6 +44,11 @@ public interface AnnouncementService {
     List<Announcement> getSidebarAnnouncements();
 
     /**
+     * 用户端：获取最近发布的公告+系统通知（混合，置顶优先，用于侧边栏轮播）
+     */
+    List<Announcement> getRecentAnnouncements(int limit);
+
+    /**
      * 用户端：获取当前用户的系统通知（含已读状态）
      */
     Map<String, Object> getSystemNotificationsForUser(Long userId, Integer pageNum, Integer pageSize);

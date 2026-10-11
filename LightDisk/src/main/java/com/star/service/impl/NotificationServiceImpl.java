@@ -111,6 +111,7 @@ public class NotificationServiceImpl implements NotificationService {
             vo.setContent(m.getContent());
             vo.setMessageType(m.getMessageType());
             vo.setRelatedId(m.getRelatedId());
+            vo.setAttachments(m.getAttachments());
             vo.setSenderName(getSenderName(m.getSenderId()));
             vo.setSenderIsContact(m.getSenderId() != null && contactIds.contains(m.getSenderId()));
             vo.setCreatedAt(m.getCreatedAt());

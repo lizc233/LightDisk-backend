@@ -8,6 +8,7 @@
         <result column="receiver_id" property="receiverId"/>
         <result column="title" property="title"/>
         <result column="content" property="content"/>
+        <result column="attachments" property="attachments"/>
         <result column="message_type" property="messageType"/>
         <result column="related_id" property="relatedId"/>
         <result column="is_read" property="isRead"/>
@@ -16,7 +17,7 @@
     </resultMap>
 
     <sql id="Base_Column_List">
-        id, sender_id, receiver_id, title, content,
+        id, sender_id, receiver_id, title, content, attachments,
         message_type, related_id, is_read, read_at, created_at
     </sql>
 

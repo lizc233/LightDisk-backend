@@ -40,6 +40,9 @@ public class PersonalMessageServiceImpl implements PersonalMessageService {
     private static final int TYPE_ADMIN = 2;
     private static final int TYPE_USER = 4;
 
+    /** 附件 JSON 最大长度 */
+    private static final int ATTACHMENTS_MAX_LENGTH = 4000;
+
     /** 接收私信策略：0-所有人 1-仅联系人 2-不接受 */
     private static final int POLICY_ALL = 0;
     private static final int POLICY_CONTACT_ONLY = 1;
@@ -110,6 +113,7 @@ public class PersonalMessageServiceImpl implements PersonalMessageService {
         boolean isAdmin = sender.getIsAdmin() != null && sender.getIsAdmin() == 1;
         String title = dto.getTitle().trim();
         String content = dto.getContent().trim();
+        String attachments = normalizeAttachments(dto.getAttachments());
         boolean autoAddContact = !isAdmin && Boolean.TRUE.equals(dto.getAutoAddContact());
 
         // 去重，避免同一批里重复发给同一个人
@@ -148,6 +152,7 @@ public class PersonalMessageServiceImpl implements PersonalMessageService {
             msg.setReceiverId(receiverId);
             msg.setTitle(title);
             msg.setContent(content);
+            msg.setAttachments(attachments);
             msg.setMessageType(isAdmin ? TYPE_ADMIN : TYPE_USER);
             msg.setIsRead(0);
             msg.setCreatedAt(LocalDateTime.now());
@@ -220,12 +225,41 @@ public class PersonalMessageServiceImpl implements PersonalMessageService {
         return data;
     }
 
+    /**
+     * 归一化附件 JSON：空白转 null，校验是合法 JSON 数组且长度受限。
+     * 附件元素应为 {"fileId":..,"name":..,"size":..,"type":..}，fileId 需为数字。
+     */
+    private String normalizeAttachments(String raw) {
+        if (StrUtil.isBlank(raw)) {
+            return null;
+        }
+        String value = raw.trim();
+        if (value.length() > ATTACHMENTS_MAX_LENGTH) {
+            throw new BusinessException("附件信息过大");
+        }
+        try {
+            cn.hutool.json.JSONArray arr = cn.hutool.json.JSONUtil.parseArray(value);
+            for (Object item : arr) {
+                cn.hutool.json.JSONObject obj = (cn.hutool.json.JSONObject) item;
+                if (obj == null || obj.getLong("fileId") == null || StrUtil.isBlank(obj.getStr("name"))) {
+                    throw new BusinessException("附件数据缺少 fileId 或文件名");
+                }
+            }
+        } catch (BusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new BusinessException("附件数据格式不正确");
+        }
+        return value;
+    }
+
     private PersonalMessageVO toVO(PersonalMessage entity, Set<Long> contactIds) {
         PersonalMessageVO vo = new PersonalMessageVO();
         vo.setId(entity.getId());
         vo.setSenderId(entity.getSenderId());
         vo.setTitle(entity.getTitle());
         vo.setContent(entity.getContent());
+        vo.setAttachments(entity.getAttachments());
         vo.setMessageType(entity.getMessageType());
         vo.setRelatedId(entity.getRelatedId());
         vo.setIsRead(entity.getIsRead());

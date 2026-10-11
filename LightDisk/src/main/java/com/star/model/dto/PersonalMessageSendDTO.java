@@ -17,6 +17,13 @@ public class PersonalMessageSendDTO {
     /** 消息内容 */
     private String content;
 
+    /**
+     * 附件 JSON 数组字符串（可选），元素结构：
+     * [{"fileId":123,"name":"报告.pdf","size":102400,"type":"pdf"}]
+     * 服务端会校验 JSON 合法性并限制长度
+     */
+    private String attachments;
+
     /** 发送成功后是否把接收者自动加为联系人（仅普通用户生效） */
     private Boolean autoAddContact;
 }
