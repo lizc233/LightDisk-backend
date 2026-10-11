@@ -57,8 +57,19 @@ CREATE TABLE IF NOT EXISTS `personal_message` (
 
 -- =============================================
 -- 初始化数据：插入几条示例公告（用于演示）
+-- 幂等：按标题判重，重复执行不会产生重复数据
+-- publisher_id 动态取管理员账号（is_admin=1）
 -- =============================================
-INSERT INTO `announcement` (`title`, `content`, `type`, `target_type`, `publisher_id`, `status`) VALUES
-('欢迎使用 LightDisk 云盘', '<p>LightDisk 是一款轻量级云盘管理系统，支持文件上传下载、分享、回收站、AI 助手等功能。</p><p>如有问题请联系管理员。</p>', 1, 0, 9, 1),
-('系统维护通知', '<p>系统将于本周六 02:00-04:00 进行例行维护，届时服务将暂时不可用，请提前保存好工作内容。</p>', 2, 0, 9, 1)
-ON DUPLICATE KEY UPDATE `updated_at` = NOW();
+INSERT INTO `announcement` (`title`, `content`, `type`, `target_type`, `publisher_id`, `status`)
+SELECT '欢迎使用 LightDisk 云盘',
+       '<p>LightDisk 是一款轻量级云盘管理系统，支持文件上传下载、分享、回收站、AI 助手等功能。</p><p>如有问题请联系管理员。</p>',
+       1, 0, (SELECT id FROM `user` WHERE is_admin = 1 ORDER BY id LIMIT 1), 1
+FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM `announcement` WHERE `title` = '欢迎使用 LightDisk 云盘');
+
+INSERT INTO `announcement` (`title`, `content`, `type`, `target_type`, `publisher_id`, `status`)
+SELECT '系统维护通知',
+       '<p>系统将于本周六 02:00-04:00 进行例行维护，届时服务将暂时不可用，请提前保存好工作内容。</p>',
+       2, 0, (SELECT id FROM `user` WHERE is_admin = 1 ORDER BY id LIMIT 1), 1
+FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM `announcement` WHERE `title` = '系统维护通知');
