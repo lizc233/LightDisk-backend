@@ -25,10 +25,13 @@ public class NotificationItemVO {
 
     // ===== 个人消息字段 =====
     private Long messageId;
+    private Long senderId;
     private String senderName;
-    /** 1-系统自动 2-管理员私信 3-分享通知 */
+    /** 1-系统自动 2-管理员私信 3-分享通知 4-用户私信 */
     private Integer messageType;
     private Long relatedId;
+    /** 发送者是否为当前用户的联系人（用于区分陌生消息） */
+    private Boolean senderIsContact;
 
     // ===== 通用 =====
     /** 是否已读 */

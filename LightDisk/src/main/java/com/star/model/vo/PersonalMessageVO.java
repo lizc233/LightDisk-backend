@@ -14,9 +14,11 @@ public class PersonalMessageVO {
     private String senderName;
     /** 发送者ID */
     private Long senderId;
+    /** 发送者是否为当前用户的联系人 */
+    private Boolean senderIsContact;
     private String title;
     private String content;
-    /** 类型：1-系统自动 2-管理员私信 3-分享通知 */
+    /** 类型：1-系统自动 2-管理员私信 3-分享通知 4-用户私信 */
     private Integer messageType;
     /** 关联ID */
     private Long relatedId;

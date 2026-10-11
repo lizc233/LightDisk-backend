@@ -18,4 +18,7 @@ public class UserSettingsUpdateDTO {
     private String docOpenAction;
 
     private String otherOpenAction;
+
+    /** 接收私信策略：0-所有人 1-仅联系人 2-不接受 */
+    private Integer messagePolicy;
 }

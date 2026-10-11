@@ -54,6 +54,8 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
     private static final int DEFAULT_RECYCLE_REMINDER_DAYS = 3;
     private static final String ACTION_PREVIEW = "preview";
     private static final String ACTION_DOWNLOAD = "download";
+    /** 接收私信策略：0-所有人 1-仅联系人 2-不接受 */
+    private static final int DEFAULT_MESSAGE_POLICY = 0;
     private static final String USERNAME_PATTERN = "^[\\u4e00-\\u9fa5A-Za-z0-9_-]+$";
 
     private final JwtUtils jwtUtils;
@@ -177,6 +179,9 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         }
         if (dto.getOtherOpenAction() != null) {
             settings.setOtherOpenAction(normalizeOpenAction(dto.getOtherOpenAction()));
+        }
+        if (dto.getMessagePolicy() != null) {
+            settings.setMessagePolicy(normalizeMessagePolicy(dto.getMessagePolicy()));
         }
 
         settings.setUpdatedAt(LocalDateTime.now());
@@ -377,6 +382,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         data.put("videoOpenAction", defaultAction(settings.getVideoOpenAction(), ACTION_PREVIEW));
         data.put("docOpenAction", defaultAction(settings.getDocOpenAction(), ACTION_DOWNLOAD));
         data.put("otherOpenAction", defaultAction(settings.getOtherOpenAction(), ACTION_DOWNLOAD));
+        data.put("messagePolicy", normalizeMessagePolicy(settings.getMessagePolicy()));
         return data;
     }
 
@@ -395,10 +401,21 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         settings.setVideoOpenAction(ACTION_PREVIEW);
         settings.setDocOpenAction(ACTION_DOWNLOAD);
         settings.setOtherOpenAction(ACTION_DOWNLOAD);
+        settings.setMessagePolicy(DEFAULT_MESSAGE_POLICY);
         settings.setCreatedAt(LocalDateTime.now());
         settings.setUpdatedAt(LocalDateTime.now());
         userSettingsMapper.insert(settings);
         return settings;
+    }
+
+    /**
+     * 归一化消息接收策略：非法值一律回落到 0（所有人可发）
+     */
+    private int normalizeMessagePolicy(Integer policy) {
+        if (policy == null) {
+            return DEFAULT_MESSAGE_POLICY;
+        }
+        return (policy >= 0 && policy <= 2) ? policy : DEFAULT_MESSAGE_POLICY;
     }
 
     private UserSettings normalizeUserSettings(UserSettings settings) {
@@ -429,6 +446,10 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         }
         if (StrUtil.isBlank(settings.getOtherOpenAction())) {
             settings.setOtherOpenAction(ACTION_DOWNLOAD);
+            changed = true;
+        }
+        if (settings.getMessagePolicy() == null) {
+            settings.setMessagePolicy(DEFAULT_MESSAGE_POLICY);
             changed = true;
         }
         if (changed) {

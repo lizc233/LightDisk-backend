@@ -11,6 +11,7 @@ import com.star.model.entity.AnnouncementRead;
 import com.star.model.entity.PersonalMessage;
 import com.star.model.vo.NotificationItemVO;
 import com.star.service.NotificationService;
+import com.star.service.UserContactService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -36,6 +37,7 @@ public class NotificationServiceImpl implements NotificationService {
     private final PersonalMessageMapper personalMessageMapper;
     private final UserMapper userMapper;
     private final StringRedisTemplate stringRedisTemplate;
+    private final UserContactService userContactService;
 
     private static final String REDIS_KEY_UNREAD = "notification:unread:";
     private static final long CACHE_EXPIRE_HOURS = 24; // 缓存 24 小时
@@ -75,6 +77,9 @@ public class NotificationServiceImpl implements NotificationService {
                 new LambdaQueryWrapper<AnnouncementRead>().eq(AnnouncementRead::getUserId, userId)
         ).stream().map(AnnouncementRead::getAnnouncementId).collect(Collectors.toSet());
 
+        // 我的联系人ID集合，用于标记陌生消息
+        Set<Long> contactIds = userContactService.contactIdSet(userId);
+
         // 获取个人消息
         Page<PersonalMessage> msgPage = new Page<>(pageNum, pageSize / 2);
         LambdaQueryWrapper<PersonalMessage> msgWrapper = new LambdaQueryWrapper<>();
@@ -101,11 +106,13 @@ public class NotificationServiceImpl implements NotificationService {
             NotificationItemVO vo = new NotificationItemVO();
             vo.setItemType("message");
             vo.setMessageId(m.getId());
+            vo.setSenderId(m.getSenderId());
             vo.setTitle(m.getTitle());
             vo.setContent(m.getContent());
             vo.setMessageType(m.getMessageType());
             vo.setRelatedId(m.getRelatedId());
             vo.setSenderName(getSenderName(m.getSenderId()));
+            vo.setSenderIsContact(m.getSenderId() != null && contactIds.contains(m.getSenderId()));
             vo.setCreatedAt(m.getCreatedAt());
             vo.setIsRead(m.getIsRead() == 1);
             merged.add(vo);

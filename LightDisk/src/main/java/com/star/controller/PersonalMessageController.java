@@ -15,6 +15,7 @@ import java.util.Map;
 
 /**
  * 个人消息接口
+ * 发送权限：所有登录用户（管理员与普通用户通用，类型由服务端判定）
  */
 @RestController
 @RequiredArgsConstructor
@@ -24,15 +25,17 @@ public class PersonalMessageController {
 
     private final PersonalMessageService personalMessageService;
 
-    @ApiOperation("获取个人消息列表")
+    @ApiOperation("获取个人消息列表（group: all / contact / stranger）")
     @GetMapping
     public Result<Map<String, Object>> getMessageList(
             @RequestParam(defaultValue = "1") Integer pageNum,
-            @RequestParam(defaultValue = "10") Integer pageSize) {
-        return Result.success(personalMessageService.getMessageList(BaseContext.getCurrentId(), pageNum, pageSize));
+            @RequestParam(defaultValue = "10") Integer pageSize,
+            @RequestParam(defaultValue = "all") String group) {
+        return Result.success(personalMessageService.getMessageList(
+                BaseContext.getCurrentId(), pageNum, pageSize, group));
     }
 
-    @ApiOperation("管理员：发送私信")
+    @ApiOperation("发送私信（管理员与普通用户均可）")
     @PostMapping("/send")
     public Result<List<PersonalMessage>> sendMessage(@RequestBody PersonalMessageSendDTO dto) {
         return Result.success(personalMessageService.sendPersonalMessage(BaseContext.getCurrentId(), dto));
