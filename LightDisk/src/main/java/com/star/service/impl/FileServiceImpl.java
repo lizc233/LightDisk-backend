@@ -5,6 +5,8 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.star.model.dto.FileQueryDTO;
+import com.star.model.dto.SaveFileContentDTO;
+import com.star.model.vo.FileContentVO;
 import com.star.model.vo.FileListVO;
 import com.star.model.entity.File;
 import com.star.model.entity.Folder;
@@ -30,12 +32,16 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.LocalDateTime;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -398,5 +404,176 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements IF
 
     private long defaultLong(Long value) {
         return value == null ? 0L : value;
+    }
+
+    // ==================== 在线编辑器（文本文件） ====================
+
+    /** 可编辑的文本扩展名白名单 */
+    private static final Set<String> EDITABLE_EXTS = new HashSet<>(Arrays.asList(
+            "txt", "md", "json", "csv", "log", "xml", "yml", "yaml", "ini", "conf", "properties", "html", "css", "js", "sql", "bat", "sh"));
+
+    /** 可编辑大小上限：2MB */
+    private static final long MAX_EDIT_SIZE = 2L * 1024 * 1024;
+
+    @Override
+    public FileContentVO getFileContent(Long fileId, Long userId) {
+        File userFile = fileMapper.selectById(fileId);
+        if (userFile == null || !userFile.getUserId().equals(userId)) {
+            throw new BusinessException("文件不存在或无权限");
+        }
+        StorageFile storageFile = storageFileMapper.selectById(userFile.getStorageId());
+        if (storageFile == null) {
+            throw new BusinessException("物理文件不存在");
+        }
+
+        FileContentVO vo = new FileContentVO();
+        vo.setFileId(fileId);
+        vo.setFileName(userFile.getFileName());
+        vo.setMd5(storageFile.getFileMd5());
+        vo.setSize(storageFile.getFileSize());
+        String name = userFile.getFileName() == null ? "" : userFile.getFileName();
+        int dot = name.lastIndexOf('.');
+        String ext = dot >= 0 ? name.substring(dot + 1).toLowerCase() : "";
+        vo.setExt(ext);
+
+        String reason = editableCheck(ext, storageFile.getFileSize());
+        if (reason != null) {
+            vo.setEditable(false);
+            vo.setReason(reason);
+            vo.setContent(null);
+            return vo;
+        }
+
+        try {
+            byte[] bytes = Files.readAllBytes(Paths.get(storageFile.getRealPath()));
+            String content = new String(bytes, StandardCharsets.UTF_8);
+            vo.setEditable(true);
+            vo.setContent(content);
+        } catch (IOException e) {
+            log.error("读取文件内容失败: {}", storageFile.getRealPath(), e);
+            throw new BusinessException("读取文件内容失败");
+        }
+        return vo;
+    }
+
+    private String editableCheck(String ext, Long size) {
+        if (!EDITABLE_EXTS.contains(ext)) {
+            return "该类型不支持在线编辑";
+        }
+        if (size != null && size > MAX_EDIT_SIZE) {
+            return "文件超过 2MB，不支持在线编辑";
+        }
+        return null;
+    }
+
+    @Override
+    @Transactional
+    public String saveFileContent(Long fileId, SaveFileContentDTO dto, Long userId) {
+        if (dto == null || dto.getContent() == null) {
+            throw new BusinessException("内容不能为空");
+        }
+        File userFile = fileMapper.selectById(fileId);
+        if (userFile == null || !userFile.getUserId().equals(userId)) {
+            throw new BusinessException("文件不存在或无权限");
+        }
+        if (!Integer.valueOf(1).equals(userFile.getStatus())) {
+            throw new BusinessException("文件在回收站中，无法编辑");
+        }
+        StorageFile oldStorage = storageFileMapper.selectById(userFile.getStorageId());
+        if (oldStorage == null) {
+            throw new BusinessException("物理文件不存在");
+        }
+
+        String name = userFile.getFileName() == null ? "" : userFile.getFileName();
+        int dot = name.lastIndexOf('.');
+        String ext = dot >= 0 ? name.substring(dot + 1).toLowerCase() : "";
+        String reason = editableCheck(ext, null);
+        if (reason != null) {
+            throw new BusinessException(reason);
+        }
+
+        // ===== 乐观锁：客户端打开时的 MD5 与服务端当前 MD5 不一致 → 有人已改过，拒绝保存 =====
+        if (dto.getBaseMd5() != null && !dto.getBaseMd5().trim().isEmpty()
+                && !dto.getBaseMd5().equals(oldStorage.getFileMd5())) {
+            throw new BusinessException("文件已被其他窗口修改，请刷新后重试");
+        }
+
+        byte[] bytes = dto.getContent().getBytes(StandardCharsets.UTF_8);
+        String newMd5 = DigestUtil.md5Hex(bytes);
+        long newSize = bytes.length;
+        long oldSize = defaultLong(oldStorage.getFileSize());
+
+        // 内容未变化：直接返回，不产生新版本
+        if (newMd5.equals(oldStorage.getFileMd5())) {
+            return newMd5;
+        }
+
+        User user = userMapper.selectById(userId);
+        VipConfig vipConfig = vipConfigMapper.selectById(user.getRole());
+        if (vipConfig == null) {
+            throw new BusinessException("用户等级配置不存在");
+        }
+        long usedAfter = defaultLong(user.getUsedSpace()) - oldSize + newSize;
+        if (usedAfter > defaultLong(vipConfig.getMaxSpace())) {
+            throw new BusinessException("存储空间不足，无法保存");
+        }
+
+        // ===== 写时复制：绝不原地覆盖物理文件（storage_file 被多用户/多文件共享，ref_count 计数） =====
+        StorageFile target = storageFileMapper.selectOne(
+                new LambdaQueryWrapper<StorageFile>().eq(StorageFile::getFileMd5, newMd5));
+        if (target != null && !target.getId().equals(oldStorage.getId())) {
+            // 新内容已存在（别人传过/历史版本）→ 直接复用
+            target.setRefCount(defaultInt(target.getRefCount()) + 1);
+            storageFileMapper.updateById(target);
+            userFile.setStorageId(target.getId());
+        } else {
+            // 全新内容 → 写新物理文件 <upload-dir>/<md5前2位>/<md5>
+            Path targetPath = Paths.get(uploadDir, newMd5.substring(0, 2), newMd5);
+            try {
+                Files.createDirectories(targetPath.getParent());
+                Files.write(targetPath, bytes);
+            } catch (IOException e) {
+                log.error("写时复制写入物理文件失败: {}", targetPath, e);
+                throw new BusinessException("保存失败：写入存储异常");
+            }
+
+            StorageFile created = new StorageFile();
+            created.setFileMd5(newMd5);
+            created.setRealPath(targetPath.toString());
+            created.setFileSize(newSize);
+            created.setFileType(ext);
+            created.setRefCount(1);
+            created.setFirstUploadUser(userId);
+            created.setFileExtension(ext);
+            created.setCreatedAt(LocalDateTime.now());
+            storageFileMapper.insert(created);
+            userFile.setStorageId(created.getId());
+        }
+
+        // 释放旧存储引用：ref_count 减到 0 才删除物理文件
+        if (target == null || !target.getId().equals(oldStorage.getId())) {
+            if (defaultInt(oldStorage.getRefCount()) <= 1) {
+                java.io.File physical = new java.io.File(oldStorage.getRealPath());
+                if (physical.exists()) physical.delete();
+                storageFileMapper.deleteById(oldStorage.getId());
+            } else {
+                oldStorage.setRefCount(oldStorage.getRefCount() - 1);
+                storageFileMapper.updateById(oldStorage);
+            }
+        }
+
+        userFile.setUpdatedAt(LocalDateTime.now());
+        fileMapper.updateById(userFile);
+
+        user.setUsedSpace(Math.max(usedAfter, 0L));
+        userMapper.updateById(user);
+
+        log.info("在线编辑保存成功(写时复制): fileId={}, user={}, oldMd5={}, newMd5={}, size {}→{}",
+                fileId, userId, oldStorage.getFileMd5(), newMd5, oldSize, newSize);
+        return newMd5;
+    }
+
+    private int defaultInt(Integer value) {
+        return value == null ? 0 : value;
     }
 }

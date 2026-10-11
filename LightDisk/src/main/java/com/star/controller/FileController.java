@@ -4,6 +4,8 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.star.common.Result;
 import com.star.context.BaseContext;
 import com.star.model.dto.FileQueryDTO;
+import com.star.model.dto.SaveFileContentDTO;
+import com.star.model.vo.FileContentVO;
 import com.star.model.vo.FileListVO;
 import com.star.service.IFileService;
 import com.star.utils.JwtUtils;
@@ -123,7 +125,6 @@ public class FileController {
     public void preview(@PathVariable Long fileId,
                          HttpServletRequest request,
                          HttpServletResponse response) {
-
         Long userId = BaseContext.getCurrentId();
         String filePath = fileService.downloadFile(fileId, userId);
 
@@ -159,5 +160,20 @@ public class FileController {
         } catch (IOException e) {
             log.error("文件下载失败", e);
         }
+    }
+
+    /** 在线编辑器：读取文本文件内容（txt/md/json/csv 等） */
+    @GetMapping("/{fileId}/content")
+    public Result<FileContentVO> getFileContent(@PathVariable Long fileId) {
+        Long userId = BaseContext.getCurrentId();
+        return Result.success(fileService.getFileContent(fileId, userId));
+    }
+
+    /** 在线编辑器：保存文本内容（写时复制 + 乐观锁，冲突时返回错误提示） */
+    @PutMapping("/{fileId}/content")
+    public Result<String> saveFileContent(@PathVariable Long fileId,
+                                          @RequestBody SaveFileContentDTO dto) {
+        Long userId = BaseContext.getCurrentId();
+        return Result.success(fileService.saveFileContent(fileId, dto, userId));
     }
 }
