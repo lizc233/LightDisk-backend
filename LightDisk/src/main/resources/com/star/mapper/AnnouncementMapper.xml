@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.star.mapper.AnnouncementMapper">
+
+    <resultMap id="BaseResultMap" type="com.star.model.entity.Announcement">
+        <id column="id" property="id"/>
+        <result column="title" property="title"/>
+        <result column="content" property="content"/>
+        <result column="type" property="type"/>
+        <result column="target_type" property="targetType"/>
+        <result column="target_ids" property="targetIds"/>
+        <result column="publisher_id" property="publisherId"/>
+        <result column="is_top" property="isTop"/>
+        <result column="status" property="status"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        id, title, content, type, target_type, target_ids,
+        publisher_id, is_top, status, created_at, updated_at
+    </sql>
+
+    <!-- 侧边栏轮播公告：已发布 + 置顶优先 -->
+    <select id="selectSidebarAnnouncements" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM announcement
+        WHERE type = 1 AND status = 1
+        ORDER BY is_top DESC, created_at DESC
+        LIMIT 5
+    </select>
+
+    <!-- 用户可见的系统通知：全员 + 指定给该用户的 -->
+    <select id="selectSystemNotificationsForUser" resultMap="BaseResultMap">
+        SELECT <include refid="Base_Column_List"/>
+        FROM announcement
+        WHERE type = 2
+          AND status = 1
+          AND (target_type = 0
+               OR (target_type = 1 AND FIND_IN_SET(#{userId}, target_ids)))
+        ORDER BY is_top DESC, created_at DESC
+    </select>
+
+</mapper>

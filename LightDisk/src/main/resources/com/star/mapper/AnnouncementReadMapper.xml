@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.star.mapper.AnnouncementReadMapper">
+
+    <resultMap id="BaseResultMap" type="com.star.model.entity.AnnouncementRead">
+        <id column="id" property="id"/>
+        <result column="announcement_id" property="announcementId"/>
+        <result column="user_id" property="userId"/>
+        <result column="read_at" property="readAt"/>
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        id, announcement_id, user_id, read_at
+    </sql>
+
+</mapper>

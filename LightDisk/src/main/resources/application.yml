@@ -25,6 +25,19 @@ spring:
         max-idle: 8
         max-wait: -1ms
         min-idle: 0
+
+  rabbitmq:
+    host: ${star.rabbitmq.host}
+    port: ${star.rabbitmq.port}
+    username: ${star.rabbitmq.username}
+    password: ${star.rabbitmq.password}
+    virtual-host: /
+    listener:
+      simple:
+        acknowledge-mode: manual  # 手动确认，保证消息不丢失
+        retry:
+          enabled: true
+          max-attempts: 3         # 失败重试 3 次
   servlet:
     multipart:
       max-file-size: 10GB
