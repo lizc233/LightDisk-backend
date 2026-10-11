@@ -206,6 +206,7 @@ public class AiToolService {
             SaveFileContentDTO dto = new SaveFileContentDTO();
             dto.setContent(content);
             dto.setBaseMd5(baseMd5);
+            dto.setEditorType(com.star.model.entity.FileContentVersion.EDITOR_AI);
             String newMd5 = fileService.saveFileContent(fileId, dto, userId);
             result.put("ok", true);
             result.put("fileId", fileId);

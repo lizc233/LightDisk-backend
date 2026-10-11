@@ -13,4 +13,7 @@ public class SaveFileContentDTO {
 
     /** 打开时读到的 MD5（乐观锁：服务端当前 MD5 与其不一致则拒绝，返回冲突提示） */
     private String baseMd5;
+
+    /** 保存来源：null/0=用户手动保存 1=AI 修改（写入历史版本表区分展示） */
+    private Integer editorType;
 }

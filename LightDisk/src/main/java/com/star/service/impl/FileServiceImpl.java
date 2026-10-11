@@ -8,13 +8,16 @@ import com.star.model.dto.FileQueryDTO;
 import com.star.model.dto.SaveFileContentDTO;
 import com.star.model.vo.FileContentVO;
 import com.star.model.vo.FileListVO;
+import com.star.model.vo.FileVersionVO;
 import com.star.model.entity.File;
+import com.star.model.entity.FileContentVersion;
 import com.star.model.entity.Folder;
 import com.star.model.entity.StorageFile;
 import com.star.model.entity.User;
 import com.star.model.entity.VipConfig;
 import com.star.model.entity.SystemConfig;
 import com.star.exception.BusinessException;
+import com.star.mapper.FileContentVersionMapper;
 import com.star.mapper.FileMapper;
 import com.star.mapper.FolderMapper;
 import com.star.mapper.StorageFileMapper;
@@ -53,6 +56,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements IF
 
     private final FileMapper fileMapper;
     private final StorageFileMapper storageFileMapper;
+    private final FileContentVersionMapper fileContentVersionMapper;
     private final UserMapper userMapper;
     private final FolderMapper folderMapper;
     private final VipConfigMapper vipConfigMapper;
@@ -244,14 +248,37 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements IF
         StorageFile storageFile = storageFileMapper.selectById(userFile.getStorageId());
         fileMapper.deleteById(fileId);
 
+        // 先删历史版本行（解除钉住），再释放当前 storage
+        List<FileContentVersion> versions = fileContentVersionMapper.selectList(
+                new LambdaQueryWrapper<FileContentVersion>().eq(FileContentVersion::getFileId, fileId));
+        if (!versions.isEmpty()) {
+            fileContentVersionMapper.delete(
+                    new LambdaQueryWrapper<FileContentVersion>().eq(FileContentVersion::getFileId, fileId));
+        }
+
         if (storageFile != null) {
-            if (storageFile.getRefCount() <= 1) {
+            if (storageFile.getRefCount() <= 1 && !isStoragePinnedByVersion(storageFile.getId())) {
                 java.io.File physicalFile = new java.io.File(storageFile.getRealPath());
                 if (physicalFile.exists()) physicalFile.delete();
                 storageFileMapper.deleteById(storageFile.getId());
-            } else {
+            } else if (storageFile.getRefCount() > 1) {
                 storageFile.setRefCount(storageFile.getRefCount() - 1);
                 storageFileMapper.updateById(storageFile);
+            } else {
+                // refCount<=1 但被版本钉住：清零活跃引用，物理文件保留
+                storageFile.setRefCount(0);
+                storageFileMapper.updateById(storageFile);
+            }
+
+            // 该文件历史版本钉住的其它 storage：解除钉住后若无活跃引用则删除物理文件
+            java.util.Set<Long> otherStorageIds = new HashSet<>();
+            for (FileContentVersion v : versions) {
+                if (v.getStorageId() != null && !v.getStorageId().equals(userFile.getStorageId())) {
+                    otherStorageIds.add(v.getStorageId());
+                }
+            }
+            for (Long sid : otherStorageIds) {
+                releaseStorageIfUnpinned(sid);
             }
 
             User user = userMapper.selectById(userId);
@@ -550,16 +577,15 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements IF
             userFile.setStorageId(created.getId());
         }
 
-        // 释放旧存储引用：ref_count 减到 0 才删除物理文件
+        // ===== 历史版本（P2）：把「旧内容」存档一行，并钉住旧 storage =====
+        // 必须在释放旧 storage 之前插入：版本行钉住后，releaseStorage 才不会把物理文件删掉
+        int editorType = dto.getEditorType() == null ? FileContentVersion.EDITOR_USER
+                : dto.getEditorType().intValue();
+        recordContentVersion(userFile.getId(), oldStorage, editorType, userId);
+
+        // 释放旧存储引用：ref_count 减到 0 且未被历史版本钉住才删除物理文件
         if (target == null || !target.getId().equals(oldStorage.getId())) {
-            if (defaultInt(oldStorage.getRefCount()) <= 1) {
-                java.io.File physical = new java.io.File(oldStorage.getRealPath());
-                if (physical.exists()) physical.delete();
-                storageFileMapper.deleteById(oldStorage.getId());
-            } else {
-                oldStorage.setRefCount(oldStorage.getRefCount() - 1);
-                storageFileMapper.updateById(oldStorage);
-            }
+            releaseStorageAfterEdit(oldStorage);
         }
 
         userFile.setUpdatedAt(LocalDateTime.now());
@@ -571,6 +597,234 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements IF
         log.info("在线编辑保存成功(写时复制): fileId={}, user={}, oldMd5={}, newMd5={}, size {}→{}",
                 fileId, userId, oldStorage.getFileMd5(), newMd5, oldSize, newSize);
         return newMd5;
+    }
+
+    // ==================== 历史版本（编辑器 P2） ====================
+
+    @Override
+    public List<FileVersionVO> listVersions(Long fileId, Long userId) {
+        File userFile = ownedFile(fileId, userId);
+        List<FileContentVersion> rows = fileContentVersionMapper.selectList(
+                new LambdaQueryWrapper<FileContentVersion>()
+                        .eq(FileContentVersion::getFileId, fileId)
+                        .orderByDesc(FileContentVersion::getVersion));
+        List<FileVersionVO> list = new java.util.ArrayList<>();
+        for (FileContentVersion row : rows) {
+            FileVersionVO vo = new FileVersionVO();
+            vo.setId(row.getId());
+            vo.setVersion(row.getVersion());
+            vo.setFileMd5(row.getFileMd5());
+            vo.setFileSize(row.getFileSize());
+            vo.setEditorType(row.getEditorType());
+            vo.setEditorTypeName(editorTypeName(row.getEditorType()));
+            vo.setCreatedAt(row.getCreatedAt());
+            vo.setCurrent(row.getStorageId() != null && row.getStorageId().equals(userFile.getStorageId()));
+            list.add(vo);
+        }
+        return list;
+    }
+
+    @Override
+    public FileContentVO getVersionContent(Long fileId, Long versionId, Long userId) {
+        File userFile = ownedFile(fileId, userId);
+        FileContentVersion version = fileContentVersionMapper.selectById(versionId);
+        if (version == null || !version.getFileId().equals(fileId)) {
+            throw new BusinessException("版本不存在");
+        }
+        StorageFile storage = storageFileMapper.selectById(version.getStorageId());
+        if (storage == null) {
+            throw new BusinessException("该版本内容已超出保留范围，无法预览");
+        }
+
+        FileContentVO vo = new FileContentVO();
+        vo.setFileId(fileId);
+        vo.setFileName(userFile.getFileName());
+        vo.setMd5(storage.getFileMd5());
+        vo.setSize(storage.getFileSize());
+        String name = userFile.getFileName() == null ? "" : userFile.getFileName();
+        int dot = name.lastIndexOf('.');
+        String ext = dot >= 0 ? name.substring(dot + 1).toLowerCase() : "";
+        vo.setExt(ext);
+
+        String reason = editableCheck(ext, storage.getFileSize());
+        if (reason != null) {
+            vo.setEditable(false);
+            vo.setReason(reason);
+            return vo;
+        }
+        try {
+            byte[] bytes = Files.readAllBytes(Paths.get(storage.getRealPath()));
+            vo.setEditable(true);
+            vo.setContent(new String(bytes, StandardCharsets.UTF_8));
+        } catch (IOException e) {
+            log.error("读取历史版本内容失败: {}", storage.getRealPath(), e);
+            throw new BusinessException("读取历史版本内容失败");
+        }
+        return vo;
+    }
+
+    @Override
+    @Transactional
+    public String rollbackVersion(Long fileId, Long versionId, Long userId) {
+        File userFile = ownedFile(fileId, userId);
+        if (!Integer.valueOf(1).equals(userFile.getStatus())) {
+            throw new BusinessException("文件在回收站中，无法回滚");
+        }
+        FileContentVersion version = fileContentVersionMapper.selectById(versionId);
+        if (version == null || !version.getFileId().equals(fileId)) {
+            throw new BusinessException("版本不存在");
+        }
+        StorageFile targetStorage = storageFileMapper.selectById(version.getStorageId());
+        if (targetStorage == null) {
+            throw new BusinessException("该版本内容已超出保留范围，无法回滚");
+        }
+        StorageFile currentStorage = storageFileMapper.selectById(userFile.getStorageId());
+        if (currentStorage == null) {
+            throw new BusinessException("物理文件不存在");
+        }
+        if (targetStorage.getId().equals(currentStorage.getId())) {
+            return currentStorage.getFileMd5();
+        }
+
+        User user = userMapper.selectById(userId);
+        VipConfig vipConfig = vipConfigMapper.selectById(user.getRole());
+        if (vipConfig == null) {
+            throw new BusinessException("用户等级配置不存在");
+        }
+        long usedAfter = defaultLong(user.getUsedSpace())
+                - defaultLong(currentStorage.getFileSize()) + defaultLong(targetStorage.getFileSize());
+        if (usedAfter > defaultLong(vipConfig.getMaxSpace())) {
+            throw new BusinessException("存储空间不足，无法回滚到该版本");
+        }
+
+        // 回滚可撤销：把「当前内容」先存档为新版本（editorType=回滚产生）
+        recordContentVersion(fileId, currentStorage, FileContentVersion.EDITOR_ROLLBACK, userId);
+
+        // 指回旧 storage（内容寻址，物理文件仍在）
+        targetStorage.setRefCount(defaultInt(targetStorage.getRefCount()) + 1);
+        storageFileMapper.updateById(targetStorage);
+        userFile.setStorageId(targetStorage.getId());
+        userFile.setUpdatedAt(LocalDateTime.now());
+        fileMapper.updateById(userFile);
+
+        // 释放当前 storage（已被历史版本钉住 → 物理文件保留，供再次回滚）
+        releaseStorageAfterEdit(currentStorage);
+
+        user.setUsedSpace(Math.max(usedAfter, 0L));
+        userMapper.updateById(user);
+
+        log.info("历史版本回滚成功: fileId={}, user={}, 回滚到 v{} (md5={})",
+                fileId, userId, version.getVersion(), targetStorage.getFileMd5());
+        return targetStorage.getFileMd5();
+    }
+
+    /** 校验文件属于当前用户 */
+    private File ownedFile(Long fileId, Long userId) {
+        File userFile = fileMapper.selectById(fileId);
+        if (userFile == null || !userFile.getUserId().equals(userId)) {
+            throw new BusinessException("文件不存在或无权限");
+        }
+        return userFile;
+    }
+
+    /**
+     * 记录一条历史版本（快照旧 storage），并淘汰超出上限的最旧版本
+     */
+    private void recordContentVersion(Long fileId, StorageFile oldStorage, int editorType, Long userId) {
+        FileContentVersion latest = fileContentVersionMapper.selectList(
+                new LambdaQueryWrapper<FileContentVersion>()
+                        .eq(FileContentVersion::getFileId, fileId)
+                        .orderByDesc(FileContentVersion::getVersion)
+                        .last("LIMIT 1"))
+                .stream().findFirst().orElse(null);
+        int nextVersion = (latest == null ? 0 : latest.getVersion()) + 1;
+
+        FileContentVersion row = new FileContentVersion();
+        row.setFileId(fileId);
+        row.setVersion(nextVersion);
+        row.setStorageId(oldStorage.getId());
+        row.setFileMd5(oldStorage.getFileMd5());
+        row.setFileSize(oldStorage.getFileSize());
+        row.setEditorType(editorType);
+        row.setEditorId(userId);
+        row.setCreatedAt(LocalDateTime.now());
+        fileContentVersionMapper.insert(row);
+
+        evictOverflowVersions(fileId);
+    }
+
+    /** 每个文件最多保留 {@link FileContentVersion#MAX_VERSIONS_PER_FILE} 个版本，超出淘汰最旧 */
+    private void evictOverflowVersions(Long fileId) {
+        List<FileContentVersion> rows = fileContentVersionMapper.selectList(
+                new LambdaQueryWrapper<FileContentVersion>()
+                        .eq(FileContentVersion::getFileId, fileId)
+                        .orderByDesc(FileContentVersion::getVersion));
+        if (rows.size() <= FileContentVersion.MAX_VERSIONS_PER_FILE) {
+            return;
+        }
+        for (FileContentVersion stale : rows.subList(FileContentVersion.MAX_VERSIONS_PER_FILE, rows.size())) {
+            fileContentVersionMapper.deleteById(stale.getId());
+            releaseStorageIfUnpinned(stale.getStorageId());
+        }
+    }
+
+    /**
+     * 编辑保存/回滚后释放 storage：ref_count 减到 0 时，
+     * 若仍被历史版本钉住 → 保留物理文件（仅清零活跃引用），否则删除物理文件与记录
+     */
+    private void releaseStorageAfterEdit(StorageFile storage) {
+        if (storage == null) {
+            return;
+        }
+        if (defaultInt(storage.getRefCount()) > 1) {
+            storage.setRefCount(storage.getRefCount() - 1);
+            storageFileMapper.updateById(storage);
+            return;
+        }
+        if (isStoragePinnedByVersion(storage.getId())) {
+            if (storage.getRefCount() == null || storage.getRefCount() != 0) {
+                storage.setRefCount(0);
+                storageFileMapper.updateById(storage);
+            }
+            return;
+        }
+        java.io.File physical = new java.io.File(storage.getRealPath());
+        if (physical.exists()) physical.delete();
+        storageFileMapper.deleteById(storage.getId());
+    }
+
+    /** 版本淘汰/文件删除后：若 storage 已无版本钉住且无活跃引用，删除物理文件与记录 */
+    private void releaseStorageIfUnpinned(Long storageId) {
+        if (storageId == null || isStoragePinnedByVersion(storageId)) {
+            return;
+        }
+        StorageFile storage = storageFileMapper.selectById(storageId);
+        if (storage == null) {
+            return;
+        }
+        if (defaultInt(storage.getRefCount()) <= 0) {
+            java.io.File physical = new java.io.File(storage.getRealPath());
+            if (physical.exists()) physical.delete();
+            storageFileMapper.deleteById(storage.getId());
+        }
+    }
+
+    private boolean isStoragePinnedByVersion(Long storageId) {
+        if (storageId == null) {
+            return false;
+        }
+        Long count = fileContentVersionMapper.selectCount(
+                new LambdaQueryWrapper<FileContentVersion>().eq(FileContentVersion::getStorageId, storageId));
+        return count != null && count > 0;
+    }
+
+    private String editorTypeName(Integer editorType) {
+        if (editorType == null) return "用户保存";
+        switch (editorType.intValue()) {
+            case FileContentVersion.EDITOR_AI: return "AI 修改";
+            case FileContentVersion.EDITOR_ROLLBACK: return "版本回滚";
+            default: return "用户保存";
+        }
     }
 
     private int defaultInt(Integer value) {

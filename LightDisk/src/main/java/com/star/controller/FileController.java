@@ -7,6 +7,7 @@ import com.star.model.dto.FileQueryDTO;
 import com.star.model.dto.SaveFileContentDTO;
 import com.star.model.vo.FileContentVO;
 import com.star.model.vo.FileListVO;
+import com.star.model.vo.FileVersionVO;
 import com.star.service.IFileService;
 import com.star.utils.JwtUtils;
 import io.swagger.annotations.Api;
@@ -175,5 +176,28 @@ public class FileController {
                                           @RequestBody SaveFileContentDTO dto) {
         Long userId = BaseContext.getCurrentId();
         return Result.success(fileService.saveFileContent(fileId, dto, userId));
+    }
+
+    /** 编辑器 P2：历史版本列表（新→旧，每文件最多保留 20 个） */
+    @GetMapping("/{fileId}/versions")
+    public Result<List<FileVersionVO>> listVersions(@PathVariable Long fileId) {
+        Long userId = BaseContext.getCurrentId();
+        return Result.success(fileService.listVersions(fileId, userId));
+    }
+
+    /** 编辑器 P2：预览某个历史版本的文本内容 */
+    @GetMapping("/{fileId}/versions/{versionId}/content")
+    public Result<FileContentVO> getVersionContent(@PathVariable Long fileId,
+                                                   @PathVariable Long versionId) {
+        Long userId = BaseContext.getCurrentId();
+        return Result.success(fileService.getVersionContent(fileId, versionId, userId));
+    }
+
+    /** 编辑器 P2：回滚到指定版本（当前内容会先存为新版本，可再滚回来） */
+    @PostMapping("/{fileId}/versions/{versionId}/rollback")
+    public Result<String> rollbackVersion(@PathVariable Long fileId,
+                                          @PathVariable Long versionId) {
+        Long userId = BaseContext.getCurrentId();
+        return Result.success(fileService.rollbackVersion(fileId, versionId, userId));
     }
 }
