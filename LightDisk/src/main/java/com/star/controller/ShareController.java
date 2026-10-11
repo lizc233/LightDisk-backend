@@ -3,6 +3,7 @@ package com.star.controller;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.star.common.Result;
 import com.star.context.BaseContext;
+import com.star.exception.BusinessException;
 import com.star.model.dto.ShareCreateDTO;
 import com.star.model.vo.ShareInfoVO;
 import com.star.service.ShareService;
@@ -72,7 +73,7 @@ public class ShareController {
 
             File file = new File(filePath);
             if (!file.exists()) {
-                response.setStatus(404);
+                writeJsonError(response, 404, "文件不存在或已被删除");
                 return;
             }
 
@@ -90,9 +91,32 @@ public class ShareController {
                 }
                 outputStream.flush();
             }
+        } catch (BusinessException e) {
+            // 提取码错误、分享失效等业务异常：返回 400 + 友好提示，
+            // 避免前端整页跳转后直接看到一坨 JSON
+            writeJsonError(response, 400, e.getMessage());
         } catch (Exception e) {
             log.error("公开分享下载失败", e);
-            response.setStatus(500);
+            writeJsonError(response, 500, "下载失败，请稍后重试");
+        }
+    }
+
+    /**
+     * 以 JSON 形式回写下载错误（下载接口是流式响应，不能用全局异常处理器包装）
+     */
+    private void writeJsonError(HttpServletResponse response, int status, String message) {
+        if (response.isCommitted()) {
+            return;
+        }
+        String safeMessage = message == null ? "下载失败" : message.replace("\\", "\\\\").replace("\"", "\\\"");
+        response.reset();
+        response.setStatus(status);
+        response.setCharacterEncoding("UTF-8");
+        response.setContentType("application/json;charset=UTF-8");
+        try {
+            response.getWriter().write("{\"code\":0,\"msg\":\"" + safeMessage + "\"}");
+        } catch (Exception ignore) {
+            log.warn("回写下载错误响应失败: {}", safeMessage);
         }
     }
 
