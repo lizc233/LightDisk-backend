@@ -9,7 +9,6 @@ import com.star.mapper.UserMapper;
 import com.star.model.entity.Announcement;
 import com.star.model.entity.AnnouncementRead;
 import com.star.model.entity.PersonalMessage;
-import com.star.model.entity.PersonalMessage;
 import com.star.model.vo.NotificationItemVO;
 import com.star.service.NotificationService;
 import lombok.RequiredArgsConstructor;
