@@ -74,6 +74,9 @@ public class AiAgentServiceImpl implements AiAssistantService {
         int level = toolService.levelOf(userId);
         boolean online = aiProperties.usable();
 
+        // 前端文件选择器：用户点选了具体文件 → 意图固定为 SUMMARIZE（除非明确要求改写），目标文件即该文件
+        Long pinnedFileId = requestDTO.getFileId() == null ? null : requestDTO.getFileId();
+
         // 规则引擎先跑一遍：它负责数据库侧检索，产出的 sources / 能力卡片前端已经在渲染，
         // 在线模式只把「回答」换成模型基于这些事实生成的内容。
         AiChatResponseVO base = ruleEngine.chat(userId, requestDTO);
@@ -82,6 +85,9 @@ public class AiAgentServiceImpl implements AiAssistantService {
 
         // ==================== ① 意图理解 ====================
         Plan plan = online ? classifyByLlm(query) : ruleClassify(query, base);
+        if (pinnedFileId != null && "QA".equals(plan.intent)) {
+            plan.intent = "SUMMARIZE";
+        }
         stages.add(stage("intent", "意图理解", String.format("识别为「%s」%s，检索关键词：%s",
                 intentName(plan.intent),
                 plan.reason == null ? "" : "（" + plan.reason + "）",
@@ -126,9 +132,12 @@ public class AiAgentServiceImpl implements AiAssistantService {
                 r.put("items", files);
                 toolResults.add(r);
             } else if ("SUMMARIZE".equals(plan.intent)) {
-                Map<String, Object> target = resolveTargetFile(userId, plan);
+                Map<String, Object> target = resolveTargetFile(userId, plan, pinnedFileId);
                 if (target == null) {
                     toolStageDetail = "read_text_file：未找到匹配文件";
+                } else if (Boolean.TRUE.equals(target.get("missing"))) {
+                    toolStageDetail = "read_text_file：点选的文件不存在或无权限（fileId=" + pinnedFileId + "）";
+                    toolResults.add(missingResult("read_text_file", pinnedFileId));
                 } else {
                     Long fileId = asLong(target.get("fileId"));
                     Map<String, Object> read = toolService.readTextFile(userId, fileId);
@@ -145,9 +154,12 @@ public class AiAgentServiceImpl implements AiAssistantService {
                     toolSource.setPath(String.valueOf(target.get("path")));
                 }
             } else if ("EDIT".equals(plan.intent)) {
-                Map<String, Object> target = resolveTargetFile(userId, plan);
+                Map<String, Object> target = resolveTargetFile(userId, plan, pinnedFileId);
                 if (target == null) {
                     toolStageDetail = "write_text_file：未找到匹配文件";
+                } else if (Boolean.TRUE.equals(target.get("missing"))) {
+                    toolStageDetail = "write_text_file：点选的文件不存在或无权限（fileId=" + pinnedFileId + "）";
+                    toolResults.add(missingResult("write_text_file", pinnedFileId));
                 } else {
                     Long fileId = asLong(target.get("fileId"));
                     Map<String, Object> read = toolService.readTextFile(userId, fileId);
@@ -315,6 +327,24 @@ public class AiAgentServiceImpl implements AiAssistantService {
     // ==================== 目标文件解析 ====================
 
     private Map<String, Object> resolveTargetFile(Long userId, Plan plan) {
+        return resolveTargetFile(userId, plan, null);
+    }
+
+    /**
+     * 目标文件解析：优先用前端点选的文件（pinnedFileId），其次模型识别的文件名 / 关键词，最后回落最近文件。
+     */
+    private Map<String, Object> resolveTargetFile(Long userId, Plan plan, Long pinnedFileId) {
+        if (pinnedFileId != null) {
+            Map<String, Object> pinned = toolService.fileInfo(userId, pinnedFileId);
+            if (pinned != null) return pinned;
+            // 点选的文件不存在或无权限：明确报错而不是悄悄换成别的文件（防越权 / 防答非所问）
+            Map<String, Object> miss = new LinkedHashMap<String, Object>();
+            miss.put("fileId", pinnedFileId);
+            miss.put("name", "（文件不存在或无权限）");
+            miss.put("path", "/");
+            miss.put("missing", true);
+            return miss;
+        }
         if (StrUtil.isNotBlank(plan.targetFileName)) {
             List<Map<String, Object>> hit = toolService.searchFiles(userId, plan.targetFileName, 5);
             if (!hit.isEmpty()) return hit.get(0);
@@ -348,7 +378,17 @@ public class AiAgentServiceImpl implements AiAssistantService {
                 }
             }
             if (result.get("content") != null) {
-                context.append("    内容（可能被截断）：").append(StrUtil.sub(String.valueOf(result.get("content")), 0, 4000)).append("\n");
+                // 读取类工具：把文件名/字数等元信息一起给模型，避免模型正确作答时反而“坦白缺信息”被复核误判
+                Object fileName = result.get("fileName");
+                if (fileName != null) {
+                    context.append("    文件名：").append(fileName)
+                            .append("，共 ").append(result.get("charCount")).append(" 字符");
+                    if (Boolean.TRUE.equals(result.get("truncated"))) {
+                        context.append("（内容较长，以下为截断的前半部分）");
+                    }
+                    context.append("\n");
+                }
+                context.append("    正文：").append(StrUtil.sub(String.valueOf(result.get("content")), 0, 4000)).append("\n");
             }
             if (result.get("error") != null) {
                 context.append("    失败：").append(result.get("error")).append("\n");
@@ -402,6 +442,7 @@ public class AiAgentServiceImpl implements AiAssistantService {
                 }
             }
         }
+        appendReadFacts(context, toolResults);
         String system = "你是修正模块。用户问题与工具事实如下，原回答被复核判定有问题，请严格依据工具事实重写回答，"
                 + "不得出现工具结果之外的任何文件名或数据，简体中文，简洁分点。";
         List<Map<String, String>> messages = llmClient.messages(system,
@@ -472,6 +513,7 @@ public class AiAgentServiceImpl implements AiAssistantService {
                     facts.append("- 写入成功 newMd5=").append(result.get("newMd5")).append("\n");
                 }
             }
+            appendReadFacts(facts, toolResults);
             String system = "你是复核 Agent。判断「回答」是否完全忠于「工具事实」，是否存在编造文件名/路径/大小、"
                     + "夸大工具能力、答非所问。只输出 JSON：{\"passed\":true|false,\"issues\":[\"问题1\"]}";
             List<Map<String, String>> messages = llmClient.messages(system,
@@ -535,6 +577,39 @@ public class AiAgentServiceImpl implements AiAssistantService {
             }
         }
         return false;
+    }
+
+    /** 点选文件失效时的占位工具结果（保证轨迹与复核能看到失败事实） */
+    private Map<String, Object> missingResult(String toolName, Long fileId) {
+        Map<String, Object> r = new LinkedHashMap<String, Object>();
+        r.put("tool", toolName);
+        r.put("ok", false);
+        r.put("error", "点选的文件不存在或无权限（fileId=" + fileId + "）");
+        return r;
+    }
+
+    /**
+     * 把 read_text_file 的读取事实拼进复核/修正上下文。
+     *
+     * <p>此前 review() 与 repair() 只回传「文件列表」与写入结果，读取类工具的 content 全部丢失：
+     * 模型复核看到“无工具事实”把正常回答判为不忠实，修正模块又拿不到原文，
+     * 最终产出“当前没有可用的工具调用结果，无法获取文档内容”——这就是“txt 读取不了”的根因。
+     */
+    private String appendReadFacts(StringBuilder facts, List<Map<String, Object>> toolResults) {
+        for (Map<String, Object> result : toolResults) {
+            if (result.get("content") != null) {
+                facts.append("- read_text_file 读取到文件「").append(result.get("fileName")).append("」，")
+                        .append(result.get("charCount")).append(" 字符，正文如下：\n")
+                        .append(StrUtil.sub(String.valueOf(result.get("content")), 0, 3000)).append("\n");
+            } else if (result.get("reason") != null) {
+                facts.append("- read_text_file 读取「").append(result.get("fileName")).append("」失败：")
+                        .append(result.get("reason")).append("\n");
+            }
+            if (result.get("error") != null) {
+                facts.append("- 工具 ").append(result.get("tool")).append(" 失败：").append(result.get("error")).append("\n");
+            }
+        }
+        return facts.toString();
     }
 
     private Map<String, Object> firstReadable(List<Map<String, Object>> toolResults) {

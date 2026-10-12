@@ -20,11 +20,19 @@ import java.util.Map;
 @Api(tags = "主界面接口")
 public class BasicController {
     private final UserService userService;
+    private final com.star.service.IFileService fileService;
 
     @GetMapping("/file/user/info") // 实际路径会变为 /api/file/user/info，注意前端也要改请求路径
     public Result<Map<String, Object>> getUserInfo() {
         Long userId = BaseContext.getCurrentId();
         return Result.success(userService.getCurrentUserInfo(userId));
+    }
+
+    /** 个人中心存储分析：文件/文件夹/分享数量、分类占用、最近上传等 */
+    @GetMapping("/file/storage/stats")
+    public Result<Map<String, Object>> getStorageStats() {
+        Long userId = BaseContext.getCurrentId();
+        return Result.success(fileService.getStorageStats(userId));
     }
 
     @PostMapping("/user/email/send-code")

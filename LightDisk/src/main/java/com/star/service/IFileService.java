@@ -55,4 +55,9 @@ public interface IFileService extends IService<File> {
      * 返回回滚后的 MD5
      */
     String rollbackVersion(Long fileId, Long versionId, Long userId);
+
+    /**
+     * 个人中心存储分析：文件/文件夹/分享数量、分类占用、最近上传等
+     */
+    java.util.Map<String, Object> getStorageStats(Long userId);
 }

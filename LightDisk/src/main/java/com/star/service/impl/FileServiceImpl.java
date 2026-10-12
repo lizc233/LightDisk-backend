@@ -62,6 +62,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements IF
     private final VipConfigMapper vipConfigMapper;
     private final SystemConfigMapper systemConfigMapper;   // 新增：用于读取内存阈值
     private final MemoryMonitor memoryMonitor;             // 新增：内存监控工具
+    private final com.star.mapper.ShareMapper shareMapper; // 存储分析：分享统计
 
     @Value("${file.upload-dir:./uploads}")
     private String uploadDir;
@@ -351,8 +352,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements IF
         }
 
         // 场景 B：常规的层级浏览 (根据 folderId 查询当前目录下的文件夹和文件)
-        // 这里的逻辑与你原来的类似，但要注意如果是常规浏览，其实不需要分页，或者要做假分页（组合文件夹和文件）
-        // 为了简化，常规浏览时可以直接查出所有，封装进第一页。
+        // 文件夹在前；两类各自按创建时间倒序（新上传的在上面，久远文件沉底），再真实分页
         Long targetFolderId = query.getFolderId() != null ? query.getFolderId() : 0L;
 
         List<Folder> folders = folderMapper.selectList(
@@ -360,12 +360,14 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements IF
                         .eq(Folder::getParentId, targetFolderId)
                         .eq(Folder::getUserId, userId)
                         .eq(Folder::getIsDeleted, 0)
+                        .orderByDesc(Folder::getCreatedAt)
         );
         List<File> files = fileMapper.selectList(
                 new LambdaQueryWrapper<File>()
                         .eq(File::getFolderId, targetFolderId)
                         .eq(File::getUserId, userId)
                         .eq(File::getStatus, 1)
+                        .orderByDesc(File::getCreatedAt)
         );
 
         List<FileListVO> voList = folders.stream().map(f -> {
@@ -387,7 +389,13 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements IF
         }).collect(Collectors.toList()));
         fillSizeAndExt(voList.stream().filter(v -> !"folder".equals(v.getType())).collect(Collectors.toList()));
 
-        resultPage.setRecords(voList);
+        // 手动分页（列表由文件夹+文件两段拼接，无法在 SQL 层一次分页）
+        int pageNum = query.getPageNum() == null || query.getPageNum() < 1 ? 1 : query.getPageNum();
+        int pageSize = query.getPageSize() == null || query.getPageSize() < 1 ? 20 : query.getPageSize();
+        int from = Math.min((pageNum - 1) * pageSize, voList.size());
+        int to = Math.min(from + pageSize, voList.size());
+
+        resultPage.setRecords(voList.subList(from, to));
         resultPage.setTotal(voList.size());
         return resultPage;
     }
@@ -431,6 +439,97 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements IF
 
     private long defaultLong(Long value) {
         return value == null ? 0L : value;
+    }
+
+    // ==================== 个人中心：存储分析统计 ====================
+
+    @Override
+    public Map<String, Object> getStorageStats(Long userId) {
+        Map<String, Object> stats = new java.util.LinkedHashMap<>();
+
+        // 文件与文件夹数量
+        Long fileCount = fileMapper.selectCount(new LambdaQueryWrapper<File>()
+                .eq(File::getUserId, userId).eq(File::getStatus, 1));
+        Long folderCount = folderMapper.selectCount(new LambdaQueryWrapper<Folder>()
+                .eq(Folder::getUserId, userId).eq(Folder::getIsDeleted, 0));
+        // 有效分享（未删除且未过期）
+        Long shareCount = shareMapper.selectCount(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.star.model.entity.Share>()
+                .eq(com.star.model.entity.Share::getUserId, userId)
+                .eq(com.star.model.entity.Share::getStatus, 1));
+
+        // 全部活跃文件 → 分类占用（字节）与最近上传
+        List<File> files = fileMapper.selectList(new LambdaQueryWrapper<File>()
+                .eq(File::getUserId, userId).eq(File::getStatus, 1));
+        List<Long> storageIds = files.stream().map(File::getStorageId)
+                .filter(java.util.Objects::nonNull).collect(Collectors.toList());
+        Map<Long, StorageFile> storageMap = storageIds.isEmpty()
+                ? Collections.emptyMap()
+                : storageFileMapper.selectBatchIds(storageIds).stream()
+                        .collect(Collectors.toMap(StorageFile::getId, s -> s, (a, b) -> a));
+
+        long imageBytes = 0L, docBytes = 0L, videoBytes = 0L, otherBytes = 0L;
+        long totalFiles = 0L;
+        LocalDateTime lastUpload = null;
+        LocalDateTime sevenDaysAgo = LocalDateTime.now().minusDays(7);
+        long recentUploads = 0L;
+        File biggest = null;
+        long biggestBytes = -1L;
+
+        for (File f : files) {
+            totalFiles++;
+            LocalDateTime created = f.getCreatedAt();
+            if (lastUpload == null || (created != null && created.isAfter(lastUpload))) {
+                lastUpload = created;
+            }
+            if (created != null && created.isAfter(sevenDaysAgo)) {
+                recentUploads++;
+            }
+            StorageFile sf = f.getStorageId() == null ? null : storageMap.get(f.getStorageId());
+            long bytes = sf == null || sf.getFileSize() == null ? 0L : sf.getFileSize();
+            if (bytes > biggestBytes) {
+                biggestBytes = bytes;
+                biggest = f;
+            }
+            String ext = extOf(f.getFileName());
+            if (IMAGE_EXTS.contains(ext)) {
+                imageBytes += bytes;
+            } else if (DOC_EXTS.contains(ext)) {
+                docBytes += bytes;
+            } else if (VIDEO_EXTS.contains(ext)) {
+                videoBytes += bytes;
+            } else {
+                otherBytes += bytes;
+            }
+        }
+
+        stats.put("fileCount", totalFiles);
+        stats.put("folderCount", folderCount == null ? 0L : folderCount);
+        stats.put("shareCount", shareCount == null ? 0L : shareCount);
+        stats.put("recentUploads", recentUploads);
+        stats.put("lastUploadTime", lastUpload);
+        Map<String, Long> categoryBytes = new java.util.LinkedHashMap<>();
+        categoryBytes.put("image", imageBytes);
+        categoryBytes.put("doc", docBytes);
+        categoryBytes.put("video", videoBytes);
+        categoryBytes.put("other", otherBytes);
+        stats.put("categoryBytes", categoryBytes);
+        if (biggest != null) {
+            stats.put("biggestFileName", biggest.getFileName());
+            stats.put("biggestFileSize", biggestBytes);
+        }
+        return stats;
+    }
+
+    private static final Set<String> IMAGE_EXTS = new HashSet<>(Arrays.asList(
+            "png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "ico"));
+    private static final Set<String> DOC_EXTS = new HashSet<>(Arrays.asList(
+            "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "md", "csv", "json", "html", "xml"));
+    private static final Set<String> VIDEO_EXTS = new HashSet<>(Arrays.asList(
+            "mp4", "avi", "mov", "mkv", "webm", "flv", "wmv"));
+
+    private String extOf(String name) {
+        if (name == null || !name.contains(".")) return "";
+        return name.substring(name.lastIndexOf('.') + 1).toLowerCase();
     }
 
     // ==================== 在线编辑器（文本文件） ====================
