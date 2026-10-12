@@ -5,9 +5,11 @@ import com.star.common.Result;
 import com.star.context.BaseContext;
 import com.star.model.dto.FileQueryDTO;
 import com.star.model.dto.SaveFileContentDTO;
+import com.star.model.vo.DocPreviewVO;
 import com.star.model.vo.FileContentVO;
 import com.star.model.vo.FileListVO;
 import com.star.model.vo.FileVersionVO;
+import com.star.service.DocPreviewService;
 import com.star.service.IFileService;
 import com.star.utils.JwtUtils;
 import io.swagger.annotations.Api;
@@ -30,6 +32,14 @@ import java.util.List;
 public class FileController {
 
     private final IFileService fileService;
+    private final DocPreviewService docPreviewService;
+
+    /** 旧版 .doc 在线预览：后端 POI HWPF 解析后返回 HTML / 纯文本 */
+    @GetMapping("/{fileId}/doc-preview")
+    public Result<DocPreviewVO> docPreview(@PathVariable Long fileId) {
+        Long userId = BaseContext.getCurrentId();
+        return Result.success(docPreviewService.preview(fileId, userId));
+    }
 
     @PostMapping("/upload")
     public Result<Long> upload(
