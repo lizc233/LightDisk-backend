@@ -36,7 +36,10 @@ public class WebMvcConfiguration extends WebMvcConfigurationSupport {
                         "/api/password/reset/send-code",
                         "/api/password/reset",
                         "/api/share/public/*",
-                        "/api/share/public/*/download"
+                        "/api/share/public/*/download",
+                        // 头像读取：前端用作 <img src>，无法携带 Authorization 头，故放行只读接口。
+                        // 注意 /api/user/avatar/* 只匹配「带 userId」的 GET，上传/删除不带路径变量仍受保护。
+                        "/api/user/avatar/*"
                 );
         // 2) 管理员二次鉴权：/api/admin/** 要求 is_admin >= 1（防止普通用户越权调用管理接口）
         registry.addInterceptor(adminAuthInterceptor)

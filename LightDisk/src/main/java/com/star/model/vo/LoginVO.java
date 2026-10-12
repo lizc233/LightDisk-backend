@@ -12,6 +12,7 @@ public class LoginVO {
     private String username;
     private String token; // 最终生成的 JWT
     private String email;
+    private String avatar; // 头像访问地址，没有头像时为空串
     private Integer role;
     private Integer isAdmin;
     private Long usedSpace;

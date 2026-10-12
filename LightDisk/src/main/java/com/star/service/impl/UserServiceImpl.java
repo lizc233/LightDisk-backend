@@ -66,6 +66,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
     private final FolderMapper folderMapper;
     private final ObjectProvider<JavaMailSender> mailSenderProvider;
     private final com.star.service.NotificationService notificationService;
+    private final com.star.service.IAvatarService avatarService;
 
     @Value("${lightdisk.mail.enabled:false}")
     private boolean mailEnabled;
@@ -111,6 +112,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
                 .username(user.getUsername())
                 .token("Bearer " + token)
                 .email(user.getEmail())
+                .avatar(avatarService.resolveAvatarUrl(user.getId()))
                 .role(user.getRole())
                 .isAdmin(defaultInt(user.getIsAdmin(), 0))
                 .usedSpace(defaultLong(user.getUsedSpace()))
@@ -360,6 +362,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         data.put("id", user.getId());
         data.put("username", user.getUsername());
         data.put("email", user.getEmail());
+        data.put("avatar", avatarService.resolveAvatarUrl(user.getId()));
         data.put("role", currentConfig.getLevel());
         data.put("isAdmin", defaultInt(user.getIsAdmin(), 0));
         data.put("levelName", currentConfig.getLevelName());
