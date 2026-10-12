@@ -97,6 +97,43 @@ public class FileController {
         return Result.success(pageData);
     }
 
+    // ==================== 收藏 / 标签 ====================
+
+    @PutMapping("/{fileId}/favorite")
+    public Result<Boolean> toggleFavorite(@PathVariable Long fileId) {
+        return Result.success(fileService.toggleFavorite(fileId, BaseContext.getCurrentId()));
+    }
+
+    @GetMapping("/tags")
+    public Result<List<java.util.Map<String, Object>>> listTags() {
+        return Result.success(fileService.listTags(BaseContext.getCurrentId()));
+    }
+
+    @PostMapping("/tags")
+    public Result<java.util.Map<String, Object>> createTag(@RequestBody java.util.Map<String, String> body) {
+        return Result.success(fileService.createTag(BaseContext.getCurrentId(),
+                body.get("name"), body.get("color")));
+    }
+
+    @PutMapping("/tags/{tagId}")
+    public Result<Void> updateTag(@PathVariable Long tagId, @RequestBody java.util.Map<String, String> body) {
+        fileService.updateTag(tagId, BaseContext.getCurrentId(), body.get("name"), body.get("color"));
+        return Result.success(null);
+    }
+
+    @DeleteMapping("/tags/{tagId}")
+    public Result<Void> deleteTag(@PathVariable Long tagId) {
+        fileService.deleteTag(tagId, BaseContext.getCurrentId());
+        return Result.success(null);
+    }
+
+    /** 覆盖式设置文件标签：{ "tagIds": [1,2,3] } */
+    @PostMapping("/{fileId}/tags")
+    public Result<Void> setFileTags(@PathVariable Long fileId, @RequestBody java.util.Map<String, List<Long>> body) {
+        fileService.setFileTags(fileId, BaseContext.getCurrentId(), body.get("tagIds"));
+        return Result.success(null);
+    }
+
     @DeleteMapping("/{fileId}")
     public Result<Void> delete(@PathVariable Long fileId,
                                HttpServletRequest request) {

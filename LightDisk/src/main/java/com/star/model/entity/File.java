@@ -20,6 +20,8 @@ public class File {
     private Long folderId;
     private Integer downloadCount;
     private Integer status;          // 1-正常 0-回收站
+    private Integer isFavorite;      // 是否收藏 0-否 1-是
+    private LocalDateTime favoriteTime;
     private LocalDateTime deleteTime;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

@@ -21,4 +21,7 @@ public class UserSettingsUpdateDTO {
 
     /** 接收私信策略：0-所有人 1-仅联系人 2-不接受 */
     private Integer messagePolicy;
+
+    /** 快速筛选区条目顺序 JSON，最长 2000 字符 */
+    private String sidebarOrder;
 }

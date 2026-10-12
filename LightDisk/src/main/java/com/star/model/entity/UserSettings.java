@@ -30,6 +30,9 @@ public class UserSettings {
     /** 接收私信策略：0-所有人 1-仅联系人 2-不接受 */
     private Integer messagePolicy;
 
+    /** 快速筛选区条目顺序 JSON：["type:image","fav","tag:12",...] */
+    private String sidebarOrder;
+
     private LocalDateTime createdAt;
 
     private LocalDateTime updatedAt;

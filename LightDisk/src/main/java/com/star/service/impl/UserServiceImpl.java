@@ -197,6 +197,13 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         if (dto.getMessagePolicy() != null) {
             settings.setMessagePolicy(normalizeMessagePolicy(dto.getMessagePolicy()));
         }
+        if (dto.getSidebarOrder() != null) {
+            String order = dto.getSidebarOrder().trim();
+            if (order.length() > 2000) {
+                throw new BusinessException("排序数据过长");
+            }
+            settings.setSidebarOrder(order.isEmpty() ? null : order);
+        }
 
         settings.setUpdatedAt(LocalDateTime.now());
         userSettingsMapper.updateById(settings);
@@ -402,6 +409,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         data.put("docOpenAction", defaultAction(settings.getDocOpenAction(), ACTION_DOWNLOAD));
         data.put("otherOpenAction", defaultAction(settings.getOtherOpenAction(), ACTION_DOWNLOAD));
         data.put("messagePolicy", normalizeMessagePolicy(settings.getMessagePolicy()));
+        data.put("sidebarOrder", settings.getSidebarOrder() == null ? "" : settings.getSidebarOrder());
         return data;
     }
 

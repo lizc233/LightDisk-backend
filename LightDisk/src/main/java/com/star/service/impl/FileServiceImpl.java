@@ -11,6 +11,8 @@ import com.star.model.vo.FileListVO;
 import com.star.model.vo.FileVersionVO;
 import com.star.model.entity.File;
 import com.star.model.entity.FileContentVersion;
+import com.star.model.entity.FileTag;
+import com.star.model.entity.FileTagRelation;
 import com.star.model.entity.Folder;
 import com.star.model.entity.StorageFile;
 import com.star.model.entity.User;
@@ -64,6 +66,8 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements IF
     private final MemoryMonitor memoryMonitor;             // 新增：内存监控工具
     private final com.star.mapper.ShareMapper shareMapper; // 存储分析：分享统计
     private final com.star.service.OperationLogService operationLogService; // 操作日志埋点
+    private final com.star.mapper.FileTagMapper fileTagMapper;
+    private final com.star.mapper.FileTagRelationMapper fileTagRelationMapper;
 
     @Value("${file.upload-dir:./uploads}")
     private String uploadDir;
@@ -254,6 +258,9 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements IF
             throw new BusinessException("文件不存在或无权限");
 
         StorageFile storageFile = storageFileMapper.selectById(userFile.getStorageId());
+        // 清理标签关系（防孤儿数据）
+        fileTagRelationMapper.delete(new LambdaQueryWrapper<FileTagRelation>()
+                .eq(FileTagRelation::getFileId, fileId));
         fileMapper.deleteById(fileId);
 
         // 先删历史版本行（解除钉住），再释放当前 storage
@@ -347,6 +354,28 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements IF
                 }
             }
 
+            // 3. 收藏筛选
+            if (Boolean.TRUE.equals(query.getFavorite())) {
+                fileWrapper.eq(File::getIsFavorite, 1);
+            }
+
+            // 4. 标签筛选（先校验标签归属，再取关系中的文件 id 集合）
+            if (query.getTagId() != null) {
+                FileTag tag = fileTagMapper.selectById(query.getTagId());
+                if (tag == null || !tag.getUserId().equals(userId)) {
+                    throw new BusinessException("标签不存在或无权限");
+                }
+                List<Long> taggedFileIds = fileTagRelationMapper.selectList(
+                                new LambdaQueryWrapper<FileTagRelation>().eq(FileTagRelation::getTagId, query.getTagId()))
+                        .stream().map(FileTagRelation::getFileId).collect(Collectors.toList());
+                if (taggedFileIds.isEmpty()) {
+                    resultPage.setRecords(Collections.emptyList());
+                    resultPage.setTotal(0);
+                    return resultPage;
+                }
+                fileWrapper.in(File::getId, taggedFileIds);
+            }
+
             Page<File> filePage = fileMapper.selectPage(pageParam, fileWrapper);
             List<FileListVO> voList = filePage.getRecords().stream().map(f -> {
                 FileListVO vo = new FileListVO();
@@ -357,6 +386,9 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements IF
                 return vo;
             }).collect(Collectors.toList());
             fillSizeAndExt(voList);
+            Map<Long, File> fileMap = filePage.getRecords().stream()
+                    .collect(Collectors.toMap(File::getId, f -> f, (a, b) -> a));
+            fillFavoriteAndTags(voList, fileMap);
 
             resultPage.setRecords(voList);
             resultPage.setTotal(filePage.getTotal());
@@ -400,6 +432,8 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements IF
             return vo;
         }).collect(Collectors.toList()));
         fillSizeAndExt(voList.stream().filter(v -> !"folder".equals(v.getType())).collect(Collectors.toList()));
+        fillFavoriteAndTags(voList.stream().filter(v -> !"folder".equals(v.getType())).collect(Collectors.toList()),
+                files.stream().collect(Collectors.toMap(File::getId, f -> f, (a, b) -> a)));
 
         // 手动分页（列表由文件夹+文件两段拼接，无法在 SQL 层一次分页）
         int pageNum = query.getPageNum() == null || query.getPageNum() < 1 ? 1 : query.getPageNum();
@@ -530,6 +564,202 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements IF
             stats.put("biggestFileSize", biggestBytes);
         }
         return stats;
+    }
+
+    // ==================== 收藏 / 标签 ====================
+
+    @Override
+    public boolean toggleFavorite(Long fileId, Long userId) {
+        File userFile = fileMapper.selectById(fileId);
+        if (userFile == null || !userFile.getUserId().equals(userId))
+            throw new BusinessException("文件不存在或无权限");
+
+        boolean nowFav = userFile.getIsFavorite() == null || userFile.getIsFavorite() != 1;
+        userFile.setIsFavorite(nowFav ? 1 : 0);
+        userFile.setFavoriteTime(nowFav ? LocalDateTime.now() : null);
+        fileMapper.updateById(userFile);
+        operationLogService.record(userId, null, "文件", nowFav ? "favorite_add" : "favorite_remove",
+                (nowFav ? "收藏文件「" : "取消收藏文件「") + userFile.getFileName() + "」", fileId);
+        return nowFav;
+    }
+
+    @Override
+    public List<Map<String, Object>> listTags(Long userId) {
+        List<FileTag> tags = fileTagMapper.selectList(new LambdaQueryWrapper<FileTag>()
+                .eq(FileTag::getUserId, userId)
+                .orderByAsc(FileTag::getSortOrder)
+                .orderByAsc(FileTag::getId));
+        if (tags.isEmpty()) {
+            return Collections.emptyList();
+        }
+        // 每个标签的文件数（标签数量少，逐个 count 可接受）
+        List<Map<String, Object>> result = new java.util.ArrayList<>();
+        for (FileTag tag : tags) {
+            Long cnt = fileTagRelationMapper.selectCount(new LambdaQueryWrapper<FileTagRelation>()
+                    .eq(FileTagRelation::getTagId, tag.getId()));
+            Map<String, Object> m = new java.util.LinkedHashMap<>();
+            m.put("id", tag.getId());
+            m.put("name", tag.getName());
+            m.put("color", tag.getColor());
+            m.put("fileCount", cnt == null ? 0L : cnt);
+            result.add(m);
+        }
+        return result;
+    }
+
+    @Override
+    public Map<String, Object> createTag(Long userId, String name, String color) {
+        String tagColor = normalizeColor(color);
+        FileTag tag = new FileTag();
+        tag.setUserId(userId);
+        tag.setName(name);
+        tag.setColor(tagColor);
+        Long tagCount = fileTagMapper.selectCount(new LambdaQueryWrapper<FileTag>()
+                .eq(FileTag::getUserId, userId));
+        tag.setSortOrder(tagCount == null ? 0 : tagCount.intValue());
+        try {
+            fileTagMapper.insert(tag);
+        } catch (org.springframework.dao.DuplicateKeyException e) {
+            throw new BusinessException("同名标签已存在");
+        }
+        operationLogService.record(userId, null, "文件", "tag_create",
+                String.format("创建标签「%s」", name), tag.getId());
+        Map<String, Object> m = new java.util.LinkedHashMap<>();
+        m.put("id", tag.getId());
+        m.put("name", tag.getName());
+        m.put("color", tag.getColor());
+        m.put("fileCount", 0L);
+        return m;
+    }
+
+    @Override
+    public void updateTag(Long tagId, Long userId, String name, String color) {
+        FileTag tag = ownTag(tagId, userId);
+        if (name != null && !name.trim().isEmpty()) {
+            tag.setName(name.trim());
+        }
+        if (color != null) {
+            tag.setColor(normalizeColor(color));
+        }
+        try {
+            fileTagMapper.updateById(tag);
+        } catch (org.springframework.dao.DuplicateKeyException e) {
+            throw new BusinessException("同名标签已存在");
+        }
+        operationLogService.record(userId, null, "文件", "tag_update",
+                String.format("更新标签「%s」", tag.getName()), tagId);
+    }
+
+    @Override
+    @Transactional
+    public void deleteTag(Long tagId, Long userId) {
+        FileTag tag = ownTag(tagId, userId);
+        fileTagRelationMapper.delete(new LambdaQueryWrapper<FileTagRelation>()
+                .eq(FileTagRelation::getTagId, tagId));
+        fileTagMapper.deleteById(tagId);
+        operationLogService.record(userId, null, "文件", "tag_delete",
+                String.format("删除标签「%s」", tag.getName()), tagId);
+    }
+
+    @Override
+    public void setFileTags(Long fileId, Long userId, List<Long> tagIds) {
+        File userFile = fileMapper.selectById(fileId);
+        if (userFile == null || !userFile.getUserId().equals(userId))
+            throw new BusinessException("文件不存在或无权限");
+
+        List<FileTag> validTags = new java.util.ArrayList<>();
+        if (tagIds != null && !tagIds.isEmpty()) {
+            validTags = fileTagMapper.selectList(new LambdaQueryWrapper<FileTag>()
+                    .eq(FileTag::getUserId, userId)
+                    .in(FileTag::getId, tagIds));
+            if (validTags.size() < new java.util.HashSet<Long>(tagIds).size()) {
+                throw new BusinessException("存在无效标签");
+            }
+        }
+
+        List<FileTagRelation> oldRelations = fileTagRelationMapper.selectList(
+                new LambdaQueryWrapper<FileTagRelation>().eq(FileTagRelation::getFileId, fileId));
+        java.util.Set<Long> oldTagIds = new java.util.HashSet<Long>();
+        for (FileTagRelation r : oldRelations) {
+            oldTagIds.add(r.getTagId());
+            if (tagIds == null || !tagIds.contains(r.getTagId())) {
+                fileTagRelationMapper.deleteById(r.getId());
+            }
+        }
+        for (FileTag tag : validTags) {
+            if (!oldTagIds.contains(tag.getId())) {
+                FileTagRelation r = new FileTagRelation();
+                r.setTagId(tag.getId());
+                r.setFileId(fileId);
+                fileTagRelationMapper.insert(r);
+            }
+        }
+        operationLogService.record(userId, null, "文件", "tag_bind",
+                String.format("为文件「%s」设置标签：%s", userFile.getFileName(),
+                        validTags.isEmpty() ? "（清空）" : String.join("、",
+                                validTags.stream().map(FileTag::getName).collect(Collectors.toList()))),
+                fileId);
+    }
+
+    private FileTag ownTag(Long tagId, Long userId) {
+        FileTag tag = fileTagMapper.selectById(tagId);
+        if (tag == null || !tag.getUserId().equals(userId)) {
+            throw new BusinessException("标签不存在或无权限");
+        }
+        return tag;
+    }
+
+    private String normalizeColor(String color) {
+        if (color == null || color.trim().isEmpty()) {
+            return "#0F6E56";
+        }
+        String c = color.trim();
+        if (!c.matches("^#[0-9a-fA-F]{6}$")) {
+            throw new BusinessException("颜色格式不正确");
+        }
+        return c;
+    }
+
+    /** 批量填充列表 VO 的收藏状态与标签信息 */
+    private void fillFavoriteAndTags(List<FileListVO> voList, Map<Long, File> fileMap) {
+        for (FileListVO vo : voList) {
+            File f = fileMap.get(vo.getId());
+            if (f != null) {
+                vo.setIsFavorite(f.getIsFavorite() == null ? 0 : f.getIsFavorite());
+            }
+        }
+        List<Long> fileIds = new java.util.ArrayList<>(fileMap.keySet());
+        if (fileIds.isEmpty()) {
+            return;
+        }
+        List<FileTagRelation> relations = fileTagRelationMapper.selectList(
+                new LambdaQueryWrapper<FileTagRelation>().in(FileTagRelation::getFileId, fileIds));
+        if (relations.isEmpty()) {
+            return;
+        }
+        List<Long> tagIds = new java.util.ArrayList<>();
+        for (FileTagRelation r : relations) {
+            if (!tagIds.contains(r.getTagId())) {
+                tagIds.add(r.getTagId());
+            }
+        }
+        Map<Long, FileTag> tagMap = fileTagMapper.selectBatchIds(tagIds).stream()
+                .collect(Collectors.toMap(FileTag::getId, t -> t, (a, b) -> a));
+        Map<Long, List<Map<String, Object>>> tagsByFile = new java.util.HashMap<>();
+        for (FileTagRelation r : relations) {
+            FileTag tag = tagMap.get(r.getTagId());
+            if (tag == null) {
+                continue;
+            }
+            Map<String, Object> tm = new java.util.LinkedHashMap<>();
+            tm.put("id", tag.getId());
+            tm.put("name", tag.getName());
+            tm.put("color", tag.getColor());
+            tagsByFile.computeIfAbsent(r.getFileId(), k -> new java.util.ArrayList<>()).add(tm);
+        }
+        for (FileListVO vo : voList) {
+            vo.setTags(tagsByFile.get(vo.getId()));
+        }
     }
 
     private static final Set<String> IMAGE_EXTS = new HashSet<>(Arrays.asList(

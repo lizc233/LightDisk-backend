@@ -60,4 +60,19 @@ public interface IFileService extends IService<File> {
      * 个人中心存储分析：文件/文件夹/分享数量、分类占用、最近上传等
      */
     java.util.Map<String, Object> getStorageStats(Long userId);
+
+    /** 收藏/取消收藏（切换），返回切换后的状态 */
+    boolean toggleFavorite(Long fileId, Long userId);
+
+    /** 我的标签列表（含每个标签的文件数），按 sort_order 排序 */
+    java.util.List<java.util.Map<String, Object>> listTags(Long userId);
+
+    java.util.Map<String, Object> createTag(Long userId, String name, String color);
+
+    void updateTag(Long tagId, Long userId, String name, String color);
+
+    void deleteTag(Long tagId, Long userId);
+
+    /** 覆盖式设置文件的标签集合 */
+    void setFileTags(Long fileId, Long userId, java.util.List<Long> tagIds);
 }
