@@ -13,4 +13,6 @@ public class ShareCreateDTO {
     private Integer pageNum = 1;
     private Integer pageSize = 50;
     private List<Long> shareIds;
+    /** 批量分享时的文件 id 列表 */
+    private List<Long> fileIds;
 }

@@ -94,9 +94,18 @@ public class OperationLogServiceImpl extends ServiceImpl<OperationLogMapper, Ope
                                              String action, String startDate, String endDate,
                                              long page, long pageSize) {
         ensureAdmin(adminUserId);
+        LambdaQueryWrapper<OperationLog> wrapper = buildAuditWrapper(username, module, action, startDate, endDate);
+        wrapper.orderByDesc(OperationLog::getCreatedAt);
+        return buildPageResult(page, pageSize, wrapper, true);
+    }
 
+    /**
+     * 审计查询条件（列表与导出共用，保证「导出=所见」）：
+     * 隐私分级 —— 文件 / 回收站 / 私信 等私人模块永不进入管理员视野。
+     */
+    private LambdaQueryWrapper<OperationLog> buildAuditWrapper(String username, String module,
+                                                               String action, String startDate, String endDate) {
         LambdaQueryWrapper<OperationLog> wrapper = new LambdaQueryWrapper<OperationLog>();
-        // 隐私分级：私人模块不进入管理员审计
         wrapper.notIn(OperationLog::getModule, PRIVATE_MODULES);
         if (StrUtil.isNotBlank(username)) {
             wrapper.like(OperationLog::getUsername, username.trim());
@@ -113,8 +122,7 @@ public class OperationLogServiceImpl extends ServiceImpl<OperationLogMapper, Ope
         if (StrUtil.isNotBlank(endDate)) {
             wrapper.le(OperationLog::getCreatedAt, LocalDateTime.parse(endDate.trim() + "T23:59:59"));
         }
-        wrapper.orderByDesc(OperationLog::getCreatedAt);
-        return buildPageResult(page, pageSize, wrapper, true);
+        return wrapper;
     }
 
     @Override
@@ -145,6 +153,35 @@ public class OperationLogServiceImpl extends ServiceImpl<OperationLogMapper, Ope
                 shareId);
         record(share.getUserId(), null, "分享", "share_rejected",
                 String.format("你的分享（分享码 %s）被管理员驳回，链接已失效", share.getShareCode()), shareId);
+    }
+
+    // ==================== 导出（备份/留档） ====================
+
+    @Override
+    public List<OperationLog> listMyLogsForExport(Long userId, String module, int limit) {
+        LambdaQueryWrapper<OperationLog> wrapper = new LambdaQueryWrapper<OperationLog>()
+                .eq(OperationLog::getUserId, userId);
+        if (StrUtil.isNotBlank(module)) {
+            wrapper.eq(OperationLog::getModule, module);
+        }
+        wrapper.orderByDesc(OperationLog::getCreatedAt);
+        return this.list(wrapper.last("LIMIT " + normalizeExportLimit(limit)));
+    }
+
+    @Override
+    public List<OperationLog> listAuditLogsForExport(Long adminUserId, String username, String module,
+                                                     String action, String startDate, String endDate, int limit) {
+        ensureAdmin(adminUserId);
+        LambdaQueryWrapper<OperationLog> wrapper = buildAuditWrapper(username, module, action, startDate, endDate);
+        wrapper.orderByDesc(OperationLog::getCreatedAt);
+        return this.list(wrapper.last("LIMIT " + normalizeExportLimit(limit)));
+    }
+
+    private int normalizeExportLimit(int limit) {
+        if (limit <= 0) {
+            return 5000;
+        }
+        return Math.min(limit, 20000);
     }
 
     // ==================== 私有辅助 ====================

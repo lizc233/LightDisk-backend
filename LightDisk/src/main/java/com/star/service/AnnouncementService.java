@@ -39,6 +39,11 @@ public interface AnnouncementService {
     void toggleTop(Long id);
 
     /**
+     * 管理员：批量操作公告（delete / top / untop / publish / withdraw），返回受影响条数
+     */
+    int batchOperate(java.util.List<Long> ids, String action);
+
+    /**
      * 用户端：获取侧边栏轮播公告
      */
     List<Announcement> getSidebarAnnouncements();

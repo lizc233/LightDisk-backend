@@ -20,6 +20,7 @@ import com.star.model.entity.UserSettings;
 import com.star.model.vo.ShareInfoVO;
 import com.star.service.ShareService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -27,6 +28,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -35,6 +37,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Service
+@Slf4j
 @RequiredArgsConstructor
 public class ShareServiceImpl extends ServiceImpl<ShareMapper, Share> implements ShareService {
 
@@ -42,6 +45,8 @@ public class ShareServiceImpl extends ServiceImpl<ShareMapper, Share> implements
     private static final String SHARE_REDIS_PREFIX = "share:code:";
     private static final String SHARE_BASE_URL = "http://localhost:5173/share/";
     private static final int DEFAULT_SHARE_EXPIRE_DAYS = 15;
+    /** 批量分享数量上限：一次生成太多链接既难管理也容易刷爆分享表 */
+    private static final int MAX_BATCH_SHARE = 50;
     private static final Pattern SHARE_CODE_PATTERN = Pattern.compile("([A-Za-z0-9]{8,12})");
 
     private final StringRedisTemplate redisTemplate;
@@ -102,6 +107,41 @@ public class ShareServiceImpl extends ServiceImpl<ShareMapper, Share> implements
                 share.getId());
 
         return toShareInfoVO(share);
+    }
+
+    @Override
+    public List<ShareInfoVO> batchCreateShare(List<Long> fileIds, Integer expireDays, Long currentUserId) {
+        if (fileIds == null || fileIds.isEmpty()) {
+            throw new BusinessException("请选择需要分享的文件");
+        }
+        if (expireDays != null) {
+            validateShareExpireDays(expireDays);
+        }
+        List<Long> ids = new ArrayList<>();
+        for (Long id : fileIds) {
+            if (id != null && !ids.contains(id)) {
+                ids.add(id);
+            }
+        }
+        if (ids.size() > MAX_BATCH_SHARE) {
+            throw new BusinessException("单次最多批量分享 " + MAX_BATCH_SHARE + " 个文件");
+        }
+
+        List<ShareInfoVO> result = new ArrayList<>();
+        for (Long fileId : ids) {
+            ShareCreateDTO dto = new ShareCreateDTO();
+            dto.setFileId(fileId);
+            dto.setExpireDays(expireDays);
+            try {
+                result.add(createShare(dto, currentUserId));
+            } catch (BusinessException e) {
+                log.warn("批量分享跳过文件 {}: {}", fileId, e.getMessage());
+            }
+        }
+        if (result.isEmpty()) {
+            throw new BusinessException("所选文件均无法分享（可能已失效或已被移除）");
+        }
+        return result;
     }
 
     @Override

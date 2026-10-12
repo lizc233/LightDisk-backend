@@ -75,4 +75,17 @@ public interface IFileService extends IService<File> {
 
     /** 覆盖式设置文件的标签集合 */
     void setFileTags(Long fileId, Long userId, java.util.List<Long> tagIds);
+
+    /**
+     * 批量下载：收集要打包的文件（文件夹会递归展开），同时记一条操作日志。
+     * 返回 zip 条目列表（zip 内相对路径 + 物理绝对路径）。
+     */
+    java.util.List<com.star.model.vo.BatchDownloadItemVO> collectForBatchDownload(
+            java.util.List<Long> fileIds, java.util.List<Long> folderIds, Long userId);
+
+    /**
+     * 批量移动：把选中的文件与文件夹移动到目标目录，返回成功条数
+     */
+    int batchMove(java.util.List<Long> fileIds, java.util.List<Long> folderIds,
+                  Long targetFolderId, Long userId);
 }

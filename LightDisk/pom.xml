@@ -89,6 +89,13 @@
             <version>3.16</version>
         </dependency>
 
+        <!-- 图片缩略图：纯 JDK ImageIO 之上的高质量缩放封装（无传递依赖，兼容 Java 8） -->
+        <dependency>
+            <groupId>net.coobird</groupId>
+            <artifactId>thumbnailator</artifactId>
+            <version>0.4.20</version>
+        </dependency>
+
     </dependencies>
 
 

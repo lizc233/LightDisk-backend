@@ -18,6 +18,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/share")
@@ -40,6 +41,16 @@ public class ShareController {
     public Result<Page<ShareInfoVO>> list(@RequestBody ShareCreateDTO dto) {
         Long currentUserId = BaseContext.getCurrentId();
         return Result.success(shareService.getShareList(dto, currentUserId));
+    }
+
+    @PostMapping("/batch-create")
+    @ApiOperation("批量创建分享")
+    public Result<List<ShareInfoVO>> batchCreate(@RequestBody ShareCreateDTO dto) {
+        Long currentUserId = BaseContext.getCurrentId();
+        return Result.success(shareService.batchCreateShare(
+                dto == null ? null : dto.getFileIds(),
+                dto == null ? null : dto.getExpireDays(),
+                currentUserId));
     }
 
     @PostMapping("/cancel")

@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.star.model.dto.FileQueryDTO;
 import com.star.model.dto.SaveFileContentDTO;
+import com.star.model.vo.BatchDownloadItemVO;
 import com.star.model.vo.FileContentVO;
 import com.star.model.vo.FileListVO;
 import com.star.model.vo.FileVersionVO;
@@ -42,10 +43,12 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.Set;
 import java.util.List;
 import java.util.Map;
@@ -235,6 +238,239 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements IF
 
         userFile.setFolderId(actualTargetFolderId);
         fileMapper.updateById(userFile);
+    }
+
+    // ==================== 批量操作：批量下载 / 批量移动 ====================
+
+    @Override
+    public List<BatchDownloadItemVO> collectForBatchDownload(List<Long> fileIds, List<Long> folderIds, Long userId) {
+        List<BatchDownloadItemVO> items = new ArrayList<>();
+        Set<String> usedNames = new LinkedHashSet<>();
+        long totalBytes = 0L;
+
+        Set<Long> seenFileIds = new HashSet<>();
+        if (fileIds != null) {
+            for (Long fileId : fileIds) {
+                if (fileId == null || !seenFileIds.add(fileId)) {
+                    continue;
+                }
+                File userFile = fileMapper.selectById(fileId);
+                if (userFile == null || !userFile.getUserId().equals(userId)
+                        || !Integer.valueOf(1).equals(userFile.getStatus())) {
+                    continue;
+                }
+                StorageFile storage = storageFileMapper.selectById(userFile.getStorageId());
+                if (storage == null || storage.getRealPath() == null
+                        || !new java.io.File(storage.getRealPath()).exists()) {
+                    continue;
+                }
+                BatchDownloadItemVO item = buildZipItem(userFile.getFileName(), storage, usedNames);
+                if (item != null) {
+                    items.add(item);
+                    totalBytes += defaultLong(item.getSize());
+                }
+            }
+        }
+
+        Set<Long> seenFolderIds = new HashSet<>();
+        if (folderIds != null) {
+            for (Long folderId : folderIds) {
+                if (folderId == null || !seenFolderIds.add(folderId)) {
+                    continue;
+                }
+                Folder folder = folderMapper.selectById(folderId);
+                if (folder == null || !folder.getUserId().equals(userId)
+                        || (folder.getIsDeleted() != null && folder.getIsDeleted() != 0)) {
+                    continue;
+                }
+                totalBytes += collectFolderFiles(folder, userId, folder.getFolderName() + "/", items, usedNames, 0);
+            }
+        }
+
+        if (items.isEmpty()) {
+            throw new BusinessException("没有可下载的文件");
+        }
+        operationLogService.record(userId, null, "文件", "batch_download",
+                String.format("批量下载 %d 个文件（打包为 zip）", items.size()), null);
+        log.info("批量下载打包完成: user={}, entries={}, bytes={}", userId, items.size(), totalBytes);
+        return items;
+    }
+
+    /** 递归收集文件夹下的文件（zip 内保留目录层级） */
+    private long collectFolderFiles(Folder folder, Long userId, String prefix,
+                                    List<BatchDownloadItemVO> items, Set<String> usedNames, int depth) {
+        // 防御性深度/长度上限，避免异常数据把栈打穿
+        if (depth > 12 || prefix.length() > 400) {
+            return 0L;
+        }
+        long bytes = 0L;
+        List<File> files = fileMapper.selectList(new LambdaQueryWrapper<File>()
+                .eq(File::getUserId, userId)
+                .eq(File::getFolderId, folder.getId())
+                .eq(File::getStatus, 1));
+        for (File f : files) {
+            StorageFile storage = storageFileMapper.selectById(f.getStorageId());
+            if (storage == null || storage.getRealPath() == null
+                    || !new java.io.File(storage.getRealPath()).exists()) {
+                continue;
+            }
+            BatchDownloadItemVO item = buildZipItem(prefix + f.getFileName(), storage, usedNames);
+            if (item != null) {
+                items.add(item);
+                bytes += defaultLong(item.getSize());
+            }
+        }
+        List<Folder> children = folderMapper.selectList(new LambdaQueryWrapper<Folder>()
+                .eq(Folder::getUserId, userId)
+                .eq(Folder::getParentId, folder.getId())
+                .eq(Folder::getIsDeleted, 0));
+        for (Folder child : children) {
+            bytes += collectFolderFiles(child, userId, prefix + child.getFolderName() + "/",
+                    items, usedNames, depth + 1);
+        }
+        return bytes;
+    }
+
+    /** 组装一个 zip 条目；同名时追加 (2)、(3) 后缀，避免解压覆盖 */
+    private BatchDownloadItemVO buildZipItem(String entryName, StorageFile storage, Set<String> usedNames) {
+        if (entryName == null || entryName.trim().isEmpty()) {
+            return null;
+        }
+        String name = entryName.replace("\\", "/").trim();
+        String unique = name;
+        int index = 2;
+        while (!usedNames.add(unique)) {
+            if (index > 9999) {
+                return null;
+            }
+            unique = addNameSuffix(name, index++);
+        }
+        BatchDownloadItemVO item = new BatchDownloadItemVO();
+        item.setEntryName(unique);
+        item.setRealPath(storage.getRealPath());
+        item.setSize(defaultLong(storage.getFileSize()));
+        return item;
+    }
+
+    private String addNameSuffix(String name, int index) {
+        int slash = name.lastIndexOf('/');
+        String dir = slash >= 0 ? name.substring(0, slash + 1) : "";
+        String base = slash >= 0 ? name.substring(slash + 1) : name;
+        int dot = base.lastIndexOf('.');
+        if (dot > 0) {
+            return dir + base.substring(0, dot) + "(" + index + ")" + base.substring(dot);
+        }
+        return dir + base + "(" + index + ")";
+    }
+
+    @Override
+    @Transactional
+    public int batchMove(List<Long> fileIds, List<Long> folderIds, Long targetFolderId, Long userId) {
+        Long target = targetFolderId == null ? 0L : targetFolderId;
+        if (target != 0L) {
+            Folder targetFolder = folderMapper.selectById(target);
+            if (targetFolder == null || !targetFolder.getUserId().equals(userId)
+                    || (targetFolder.getIsDeleted() != null && targetFolder.getIsDeleted() != 0)) {
+                throw new BusinessException("目标文件夹不存在或无权限");
+            }
+        }
+
+        int moved = 0;
+        Set<Long> seenFileIds = new HashSet<>();
+        if (fileIds != null) {
+            for (Long fileId : fileIds) {
+                if (fileId == null || !seenFileIds.add(fileId)) {
+                    continue;
+                }
+                try {
+                    moveFileToFolder(fileId, target, userId);
+                    moved++;
+                } catch (BusinessException e) {
+                    log.warn("批量移动跳过文件 {}: {}", fileId, e.getMessage());
+                }
+            }
+        }
+
+        Set<Long> seenFolderIds = new HashSet<>();
+        if (folderIds != null) {
+            for (Long folderId : folderIds) {
+                if (folderId == null || folderId.equals(target) || !seenFolderIds.add(folderId)) {
+                    continue;
+                }
+                // 文件夹移动涉及路径重算，出错直接整体回滚，避免产生半移动的目录树
+                moveFolderToFolder(folderId, target, userId);
+                moved++;
+            }
+        }
+
+        if (moved == 0) {
+            throw new BusinessException("没有可移动的文件或文件夹");
+        }
+        operationLogService.record(userId, null, "文件", "batch_move",
+                String.format("批量移动 %d 项到「%s」", moved,
+                        target == 0L ? "全部文件" : resolveFolderName(target)), null);
+        return moved;
+    }
+
+    /** 移动文件夹：重设 parent_id 并整体平移整棵子树的 path 前缀 */
+    private void moveFolderToFolder(Long folderId, Long targetFolderId, Long userId) {
+        Folder folder = folderMapper.selectById(folderId);
+        if (folder == null || !folder.getUserId().equals(userId)
+                || (folder.getIsDeleted() != null && folder.getIsDeleted() != 0)) {
+            throw new BusinessException("文件夹不存在或无权限");
+        }
+        Long target = targetFolderId == null ? 0L : targetFolderId;
+        if (folder.getId().equals(target)) {
+            throw new BusinessException("不能把文件夹移动到自身");
+        }
+
+        String oldPath = folder.getPath() == null ? "/" + folder.getFolderName() + "/" : folder.getPath();
+        Folder targetFolder = null;
+        if (target != 0L) {
+            targetFolder = folderMapper.selectById(target);
+            if (targetFolder == null || !targetFolder.getUserId().equals(userId)
+                    || (targetFolder.getIsDeleted() != null && targetFolder.getIsDeleted() != 0)) {
+                throw new BusinessException("目标文件夹不存在或无权限");
+            }
+            String targetPath = targetFolder.getPath() == null ? "/" : targetFolder.getPath();
+            if (targetPath.startsWith(oldPath)) {
+                throw new BusinessException("不能把文件夹移动到它自己的子文件夹里");
+            }
+        }
+
+        Long duplicate = folderMapper.selectCount(new LambdaQueryWrapper<Folder>()
+                .eq(Folder::getUserId, userId)
+                .eq(Folder::getParentId, target)
+                .eq(Folder::getFolderName, folder.getFolderName())
+                .eq(Folder::getIsDeleted, 0)
+                .ne(Folder::getId, folderId));
+        if (duplicate != null && duplicate > 0) {
+            throw new BusinessException("目标目录已存在同名文件夹");
+        }
+
+        String parentPath = targetFolder == null || targetFolder.getPath() == null ? "/" : targetFolder.getPath();
+        String newPath = parentPath + folder.getFolderName() + "/";
+
+        folder.setParentId(target);
+        folder.setPath(newPath);
+        folderMapper.updateById(folder);
+
+        List<Folder> descendants = folderMapper.selectList(new LambdaQueryWrapper<Folder>()
+                .eq(Folder::getUserId, userId)
+                .likeRight(Folder::getPath, oldPath)
+                .ne(Folder::getId, folderId));
+        for (Folder child : descendants) {
+            String childPath = child.getPath();
+            if (childPath != null && childPath.startsWith(oldPath)) {
+                child.setPath(newPath + childPath.substring(oldPath.length()));
+                folderMapper.updateById(child);
+            }
+        }
+    }
+
+    private String resolveFolderName(Long folderId) {
+        Folder folder = folderMapper.selectById(folderId);
+        return folder == null ? "目标文件夹" : folder.getFolderName();
     }
 
     @Override

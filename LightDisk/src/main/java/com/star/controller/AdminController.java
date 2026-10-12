@@ -2,6 +2,8 @@ package com.star.controller;
 
 import com.star.common.Result;
 import com.star.context.BaseContext;
+import com.star.model.dto.AdminShareQueryDTO;
+import com.star.model.dto.AdminUserBatchDTO;
 import com.star.model.dto.AdminUserCreateDTO;
 import com.star.model.dto.AdminUserPageDTO;
 import com.star.model.dto.AdminUserRoleUpdateDTO;
@@ -69,5 +71,52 @@ public class AdminController {
     @PostMapping("/users/role/update")
     public Result<Map<String, Object>> updateUserRole(@RequestBody AdminUserRoleUpdateDTO dto) {
         return Result.success(adminService.updateUserRole(BaseContext.getCurrentId(), dto));
+    }
+
+    // ==================== 批量操作 ====================
+
+    @PostMapping("/users/batch/status")
+    public Result<Map<String, Object>> batchUpdateStatus(@RequestBody AdminUserBatchDTO dto) {
+        return Result.success(adminService.batchUpdateUserStatus(BaseContext.getCurrentId(), dto));
+    }
+
+    @PostMapping("/users/batch/vip")
+    public Result<Map<String, Object>> batchUpdateVip(@RequestBody AdminUserBatchDTO dto) {
+        return Result.success(adminService.batchUpdateUserVip(BaseContext.getCurrentId(), dto));
+    }
+
+    /** 仅超级管理员：批量添加用户 */
+    @PostMapping("/users/batch/add")
+    public Result<Map<String, Object>> batchAddUsers(@RequestBody AdminUserBatchDTO dto) {
+        return Result.success(adminService.batchAddUsers(BaseContext.getCurrentId(), dto));
+    }
+
+    /** 仅超级管理员：批量注销用户（级联清理其网盘数据） */
+    @PostMapping("/users/batch/delete")
+    public Result<Map<String, Object>> batchDeleteUsers(@RequestBody AdminUserBatchDTO dto) {
+        return Result.success(adminService.batchDeleteUsers(BaseContext.getCurrentId(), dto));
+    }
+
+    // ==================== 分享审核 ====================
+
+    @PostMapping("/audit/shares")
+    public Result<Map<String, Object>> sharePage(@RequestBody(required = false) AdminShareQueryDTO dto) {
+        return Result.success(adminService.getSharePage(BaseContext.getCurrentId(), dto));
+    }
+
+    @PostMapping("/audit/shares/batch-reject")
+    public Result<Integer> batchRejectShares(@RequestBody Map<String, Object> body) {
+        Long adminUserId = BaseContext.getCurrentId();
+        List<Long> shareIds = new java.util.ArrayList<Long>();
+        Object raw = body == null ? null : body.get("shareIds");
+        if (raw instanceof List) {
+            for (Object item : (List<?>) raw) {
+                if (item != null) {
+                    shareIds.add(Long.valueOf(String.valueOf(item)));
+                }
+            }
+        }
+        String reason = body == null || body.get("reason") == null ? null : String.valueOf(body.get("reason"));
+        return Result.success(adminService.batchRejectShares(adminUserId, shareIds, reason));
     }
 }

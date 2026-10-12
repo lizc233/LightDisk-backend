@@ -41,4 +41,15 @@ public interface OperationLogService extends IService<OperationLog> {
      * 管理员驳回分享：分享立即失效，并记录审计日志
      */
     void rejectShare(Long adminUserId, Long shareId, String reason);
+
+    /**
+     * 我的操作记录导出：按条件取全量（受 limit 保护的明细清单）
+     */
+    java.util.List<OperationLog> listMyLogsForExport(Long userId, String module, int limit);
+
+    /**
+     * 管理员审计日志导出：过滤条件与 pageAuditLogs 完全一致（隐私分级同样生效）
+     */
+    java.util.List<OperationLog> listAuditLogsForExport(Long adminUserId, String username, String module,
+                                                       String action, String startDate, String endDate, int limit);
 }

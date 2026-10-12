@@ -12,6 +12,11 @@ public interface ShareService extends IService<Share> {
 
     ShareInfoVO createShare(ShareCreateDTO dto, Long currentUserId);
 
+    /**
+     * 批量创建分享：一次为多个文件生成分享链接（返回生成结果，单个失败自动跳过）
+     */
+    List<ShareInfoVO> batchCreateShare(List<Long> fileIds, Integer expireDays, Long currentUserId);
+
     Page<ShareInfoVO> getShareList(ShareCreateDTO dto, Long currentUserId);
 
     int cancelShares(List<Long> shareIds, Long currentUserId);

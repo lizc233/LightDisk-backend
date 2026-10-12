@@ -6,35 +6,59 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.star.exception.BusinessException;
+import com.star.mapper.AnnouncementReadMapper;
 import com.star.mapper.FileMapper;
+import com.star.mapper.FileTagMapper;
+import com.star.mapper.FileTagRelationMapper;
 import com.star.mapper.FolderMapper;
+import com.star.mapper.PersonalMessageMapper;
 import com.star.mapper.ShareMapper;
+import com.star.mapper.UserAvatarMapper;
+import com.star.mapper.UserBlockMapper;
+import com.star.mapper.UserContactMapper;
 import com.star.mapper.UserMapper;
+import com.star.mapper.UserSettingsMapper;
 import com.star.mapper.VipConfigMapper;
+import com.star.model.dto.AdminShareQueryDTO;
+import com.star.model.dto.AdminUserBatchDTO;
 import com.star.model.dto.AdminUserCreateDTO;
 import com.star.model.dto.AdminUserPageDTO;
 import com.star.model.dto.AdminUserRoleUpdateDTO;
 import com.star.model.dto.AdminUserStatusUpdateDTO;
 import com.star.model.dto.AdminUserVipUpdateDTO;
+import com.star.model.entity.AnnouncementRead;
 import com.star.model.entity.File;
+import com.star.model.entity.FileTag;
+import com.star.model.entity.FileTagRelation;
 import com.star.model.entity.Folder;
+import com.star.model.entity.PersonalMessage;
 import com.star.model.entity.Share;
 import com.star.model.entity.User;
+import com.star.model.entity.UserAvatar;
+import com.star.model.entity.UserBlock;
+import com.star.model.entity.UserContact;
+import com.star.model.entity.UserSettings;
 import com.star.model.entity.VipConfig;
+import com.star.model.vo.AdminShareVO;
 import com.star.model.vo.UserSimpleVO;
 import com.star.service.AdminService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
 @Service
+@Slf4j
 @RequiredArgsConstructor
 public class AdminServiceImpl implements AdminService {
 
@@ -42,6 +66,8 @@ public class AdminServiceImpl implements AdminService {
     private static final int DEFAULT_PAGE_SIZE = 10;
     private static final int MAX_PAGE_SIZE = 50;
     private static final int DEFAULT_VIP_DURATION_DAYS = 365;
+    /** 单次批量操作用户数上限，避免一次请求拖垮数据库 */
+    private static final int MAX_BATCH_SIZE = 100;
     private static final int RECYCLE_RETENTION_DAYS = 30;
     private static final int RECYCLE_REMINDER_DAYS = 3;
 
@@ -52,7 +78,17 @@ public class AdminServiceImpl implements AdminService {
     private final ShareMapper shareMapper;
     private final FileMapper fileMapper;
     private final FolderMapper folderMapper;
+    private final FileTagMapper fileTagMapper;
+    private final FileTagRelationMapper fileTagRelationMapper;
+    private final UserSettingsMapper userSettingsMapper;
+    private final UserAvatarMapper userAvatarMapper;
+    private final UserContactMapper userContactMapper;
+    private final UserBlockMapper userBlockMapper;
+    private final AnnouncementReadMapper announcementReadMapper;
+    private final PersonalMessageMapper personalMessageMapper;
+    private final StringRedisTemplate stringRedisTemplate;
     private final com.star.service.OperationLogService operationLogService;
+    private final com.star.service.IFileService fileService;
 
     @Override
     public Map<String, Object> getDashboard(Long adminUserId) {
@@ -317,6 +353,371 @@ public class AdminServiceImpl implements AdminService {
                 String.format("将用户「%s」的身份由 %s 调整为 %s", user.getUsername(),
                         describeAdminRole(before), describeAdminRole(after)), user.getId());
         return buildUserRow(user, loadVipConfigMap(), LocalDateTime.now());
+    }
+
+    // ==================== 批量操作（用户 / 分享审核） ====================
+
+    @Override
+    public Map<String, Object> batchUpdateUserStatus(Long operatorId, AdminUserBatchDTO dto) {
+        ensureAdmin(operatorId);
+        List<Long> ids = dto == null ? null : dto.getUserIds();
+        if (ids == null || ids.isEmpty()) {
+            throw new BusinessException("请选择要操作的用户");
+        }
+        if (dto.getStatus() == null || (dto.getStatus() != 0 && dto.getStatus() != 1)) {
+            throw new BusinessException("账号状态仅支持 0-禁用 / 1-启用");
+        }
+        if (ids.size() > MAX_BATCH_SIZE) {
+            throw new BusinessException("单次最多操作 " + MAX_BATCH_SIZE + " 个用户");
+        }
+
+        int success = 0;
+        int skipped = 0;
+        List<String> details = new ArrayList<String>();
+        for (Long id : uniqueIds(ids)) {
+            AdminUserStatusUpdateDTO single = new AdminUserStatusUpdateDTO();
+            single.setUserId(id);
+            single.setStatus(dto.getStatus());
+            try {
+                updateUserStatus(operatorId, single);
+                success++;
+            } catch (BusinessException e) {
+                skipped++;
+                details.add("ID " + id + "：" + e.getMessage());
+            }
+        }
+        if (success == 0) {
+            throw new BusinessException(details.isEmpty() ? "没有可操作的用户" : details.get(0));
+        }
+        return batchResult(success, skipped, details);
+    }
+
+    @Override
+    public Map<String, Object> batchUpdateUserVip(Long operatorId, AdminUserBatchDTO dto) {
+        ensureAdmin(operatorId);
+        List<Long> ids = dto == null ? null : dto.getUserIds();
+        if (ids == null || ids.isEmpty()) {
+            throw new BusinessException("请选择要操作的用户");
+        }
+        if (dto.getRole() == null) {
+            throw new BusinessException("请选择目标会员等级");
+        }
+        if (ids.size() > MAX_BATCH_SIZE) {
+            throw new BusinessException("单次最多操作 " + MAX_BATCH_SIZE + " 个用户");
+        }
+
+        int success = 0;
+        int skipped = 0;
+        List<String> details = new ArrayList<String>();
+        for (Long id : uniqueIds(ids)) {
+            AdminUserVipUpdateDTO single = new AdminUserVipUpdateDTO();
+            single.setUserId(id);
+            single.setRole(dto.getRole());
+            single.setDurationDays(dto.getDurationDays());
+            try {
+                updateUserVip(operatorId, single);
+                success++;
+            } catch (BusinessException e) {
+                skipped++;
+                details.add("ID " + id + "：" + e.getMessage());
+            }
+        }
+        if (success == 0) {
+            throw new BusinessException(details.isEmpty() ? "没有可操作的用户" : details.get(0));
+        }
+        return batchResult(success, skipped, details);
+    }
+
+    @Override
+    public Map<String, Object> batchAddUsers(Long operatorId, AdminUserBatchDTO dto) {
+        ensureSuperAdmin(operatorId);
+        List<AdminUserCreateDTO> users = dto == null ? null : dto.getUsers();
+        if (users == null || users.isEmpty()) {
+            throw new BusinessException("请填写要添加的用户");
+        }
+        if (users.size() > MAX_BATCH_SIZE) {
+            throw new BusinessException("单次最多添加 " + MAX_BATCH_SIZE + " 个用户");
+        }
+
+        int success = 0;
+        int failed = 0;
+        List<String> errors = new ArrayList<String>();
+        for (AdminUserCreateDTO item : users) {
+            String username = item == null || StrUtil.isBlank(item.getUsername()) ? "(未填写用户名)" : item.getUsername().trim();
+            try {
+                addUser(operatorId, item);
+                success++;
+            } catch (BusinessException e) {
+                failed++;
+                if (errors.size() < 8) {
+                    errors.add(username + "：" + e.getMessage());
+                }
+            }
+        }
+        if (success == 0) {
+            throw new BusinessException(errors.isEmpty() ? "没有成功添加任何用户" : errors.get(0));
+        }
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("success", success);
+        result.put("failed", failed);
+        result.put("details", errors);
+        return result;
+    }
+
+    @Override
+    public Map<String, Object> batchDeleteUsers(Long operatorId, AdminUserBatchDTO dto) {
+        User operator = ensureSuperAdmin(operatorId);
+        List<Long> ids = dto == null ? null : dto.getUserIds();
+        if (ids == null || ids.isEmpty()) {
+            throw new BusinessException("请选择要注销的用户");
+        }
+        if (ids.size() > MAX_BATCH_SIZE) {
+            throw new BusinessException("单次最多注销 " + MAX_BATCH_SIZE + " 个用户");
+        }
+
+        int success = 0;
+        int skipped = 0;
+        List<String> details = new ArrayList<String>();
+        for (Long id : uniqueIds(ids)) {
+            if (operator.getId().equals(id)) {
+                skipped++;
+                details.add("不能注销当前登录的管理员账号");
+                continue;
+            }
+            User target = userMapper.selectById(id);
+            if (target == null) {
+                skipped++;
+                continue;
+            }
+            if (safeInt(target.getIsAdmin()) >= 2) {
+                skipped++;
+                details.add("「" + target.getUsername() + "」是超级管理员，已跳过");
+                continue;
+            }
+            try {
+                cleanUserData(target);
+                userMapper.deleteById(id);
+                success++;
+                operationLogService.record(operatorId, operator.getUsername(), "管理", "admin_delete_user",
+                        String.format("注销用户「%s」并清理其网盘数据", target.getUsername()), id);
+            } catch (Exception e) {
+                log.error("注销用户失败: {}", id, e);
+                skipped++;
+                details.add("「" + target.getUsername() + "」清理失败：" + e.getMessage());
+            }
+        }
+        if (success == 0) {
+            throw new BusinessException(details.isEmpty() ? "没有可注销的用户" : details.get(0));
+        }
+        return batchResult(success, skipped, details);
+    }
+
+    /**
+     * 注销用户前把属于他的数据整体清掉，避免留下孤儿记录。
+     * 文件走 permanentDeleteFile：内部已处理存储引用计数与已用空间回收。
+     */
+    private void cleanUserData(User user) {
+        Long userId = user.getId();
+
+        List<File> files = fileMapper.selectList(new LambdaQueryWrapper<File>().eq(File::getUserId, userId));
+        for (File file : files) {
+            try {
+                fileService.permanentDeleteFile(file.getId(), userId);
+            } catch (Exception e) {
+                log.warn("注销清理文件失败 fileId={}: {}", file.getId(), e.getMessage());
+                fileTagRelationMapper.delete(new LambdaQueryWrapper<FileTagRelation>()
+                        .eq(FileTagRelation::getFileId, file.getId()));
+                fileMapper.deleteById(file.getId());
+            }
+        }
+
+        folderMapper.delete(new LambdaQueryWrapper<Folder>().eq(Folder::getUserId, userId));
+
+        List<Share> shares = shareMapper.selectList(new LambdaQueryWrapper<Share>().eq(Share::getUserId, userId));
+        for (Share share : shares) {
+            try {
+                stringRedisTemplate.delete("share:code:" + share.getShareCode());
+            } catch (Exception e) {
+                log.warn("注销清理分享缓存失败 shareCode={}: {}", share.getShareCode(), e.getMessage());
+            }
+        }
+        shareMapper.delete(new LambdaQueryWrapper<Share>().eq(Share::getUserId, userId));
+
+        List<Long> tagIds = fileTagMapper.selectList(new LambdaQueryWrapper<FileTag>().eq(FileTag::getUserId, userId))
+                .stream().map(FileTag::getId).collect(Collectors.toList());
+        if (!tagIds.isEmpty()) {
+            fileTagRelationMapper.delete(new LambdaQueryWrapper<FileTagRelation>()
+                    .in(FileTagRelation::getTagId, tagIds));
+        }
+        fileTagMapper.delete(new LambdaQueryWrapper<FileTag>().eq(FileTag::getUserId, userId));
+
+        List<UserAvatar> avatars = userAvatarMapper.selectList(
+                new LambdaQueryWrapper<UserAvatar>().eq(UserAvatar::getUserId, userId));
+        for (UserAvatar avatar : avatars) {
+            if (avatar.getRealPath() != null) {
+                java.io.File physical = new java.io.File(avatar.getRealPath());
+                if (physical.exists() && !physical.delete()) {
+                    log.warn("注销清理头像物理文件失败: {}", avatar.getRealPath());
+                }
+            }
+            userAvatarMapper.deleteById(avatar.getId());
+        }
+
+        userSettingsMapper.deleteById(userId);
+        userContactMapper.delete(new LambdaQueryWrapper<UserContact>().eq(UserContact::getUserId, userId));
+        userContactMapper.delete(new LambdaQueryWrapper<UserContact>().eq(UserContact::getContactId, userId));
+        userBlockMapper.delete(new LambdaQueryWrapper<UserBlock>().eq(UserBlock::getUserId, userId));
+        userBlockMapper.delete(new LambdaQueryWrapper<UserBlock>().eq(UserBlock::getBlockedUserId, userId));
+        announcementReadMapper.delete(new LambdaQueryWrapper<AnnouncementRead>().eq(AnnouncementRead::getUserId, userId));
+        personalMessageMapper.delete(new LambdaQueryWrapper<PersonalMessage>().eq(PersonalMessage::getSenderId, userId));
+        personalMessageMapper.delete(new LambdaQueryWrapper<PersonalMessage>().eq(PersonalMessage::getReceiverId, userId));
+    }
+
+    @Override
+    public Map<String, Object> getSharePage(Long adminUserId, AdminShareQueryDTO dto) {
+        ensureAdmin(adminUserId);
+        AdminShareQueryDTO query = dto == null ? new AdminShareQueryDTO() : dto;
+        long pageNum = query.getPage() == null || query.getPage() < 1 ? 1 : query.getPage();
+        long pageSize = query.getPageSize() == null || query.getPageSize() < 1
+                ? 20 : Math.min(query.getPageSize(), 100);
+        LocalDateTime now = LocalDateTime.now();
+
+        LambdaQueryWrapper<Share> wrapper = new LambdaQueryWrapper<Share>().orderByDesc(Share::getCreatedAt);
+        if (query.getStatus() != null) {
+            wrapper.eq(Share::getStatus, query.getStatus());
+        }
+        if (Boolean.TRUE.equals(query.getOnlyExpired())) {
+            wrapper.eq(Share::getStatus, 1).isNotNull(Share::getExpireTime).lt(Share::getExpireTime, now);
+        }
+        if (StrUtil.isNotBlank(query.getUsername())) {
+            List<Long> ownerIds = userMapper.selectList(new LambdaQueryWrapper<User>()
+                            .like(User::getUsername, query.getUsername().trim()).last("limit 200"))
+                    .stream().map(User::getId).collect(Collectors.toList());
+            if (ownerIds.isEmpty()) {
+                return emptySharePage(pageNum, pageSize, now);
+            }
+            wrapper.in(Share::getUserId, ownerIds);
+        }
+        if (StrUtil.isNotBlank(query.getKeyword())) {
+            String keyword = query.getKeyword().trim();
+            List<Long> matchedFileIds = fileMapper.selectList(new LambdaQueryWrapper<File>()
+                            .like(File::getFileName, keyword).last("limit 200"))
+                    .stream().map(File::getId).collect(Collectors.toList());
+            wrapper.and(w -> {
+                w.like(Share::getShareCode, keyword);
+                if (!matchedFileIds.isEmpty()) {
+                    w.or().in(Share::getItemId, matchedFileIds);
+                }
+            });
+        }
+
+        Page<Share> page = shareMapper.selectPage(new Page<Share>(pageNum, pageSize), wrapper);
+        List<AdminShareVO> list = assembleShareVOs(page.getRecords(), now);
+
+        Map<String, Object> data = new LinkedHashMap<String, Object>();
+        data.put("list", list);
+        data.put("total", page.getTotal());
+        data.put("page", pageNum);
+        data.put("pageSize", pageSize);
+        data.put("activeCount", safeCount(shareMapper.selectCount(new LambdaQueryWrapper<Share>()
+                .eq(Share::getStatus, 1)
+                .and(w -> w.isNull(Share::getExpireTime).or().gt(Share::getExpireTime, now)))));
+        return data;
+    }
+
+    @Override
+    public int batchRejectShares(Long adminUserId, List<Long> shareIds, String reason) {
+        ensureAdmin(adminUserId);
+        if (shareIds == null || shareIds.isEmpty()) {
+            throw new BusinessException("请选择要驳回的分享");
+        }
+        int success = 0;
+        for (Long shareId : uniqueIds(shareIds)) {
+            try {
+                operationLogService.rejectShare(adminUserId, shareId, reason);
+                success++;
+            } catch (BusinessException e) {
+                // 已失效的分享直接跳过，不阻断其余驳回
+                log.debug("跳过分享 {}: {}", shareId, e.getMessage());
+            }
+        }
+        if (success == 0) {
+            throw new BusinessException("所选分享均已失效，无需驳回");
+        }
+        return success;
+    }
+
+    /** 批量拼装分享审核行（批量查用户名与文件名，避免 N+1） */
+    private List<AdminShareVO> assembleShareVOs(List<Share> shares, LocalDateTime now) {
+        if (shares == null || shares.isEmpty()) {
+            return new ArrayList<AdminShareVO>();
+        }
+        List<Long> userIds = shares.stream().map(Share::getUserId).filter(java.util.Objects::nonNull)
+                .distinct().collect(Collectors.toList());
+        Map<Long, String> usernameMap = userIds.isEmpty() ? new HashMap<Long, String>()
+                : userMapper.selectBatchIds(userIds).stream()
+                        .collect(Collectors.toMap(User::getId, User::getUsername, (a, b) -> a));
+
+        List<Long> fileIds = shares.stream().map(Share::getItemId).filter(java.util.Objects::nonNull)
+                .distinct().collect(Collectors.toList());
+        Map<Long, String> fileNameMap = fileIds.isEmpty() ? new HashMap<Long, String>()
+                : fileMapper.selectBatchIds(fileIds).stream()
+                        .collect(Collectors.toMap(File::getId, File::getFileName, (a, b) -> a));
+
+        List<AdminShareVO> list = new ArrayList<AdminShareVO>(shares.size());
+        for (Share share : shares) {
+            AdminShareVO vo = new AdminShareVO();
+            vo.setId(share.getId());
+            vo.setShareCode(share.getShareCode());
+            vo.setExtractCode(share.getExtractCode());
+            vo.setFileId(share.getItemId());
+            vo.setUserId(share.getUserId());
+            vo.setUsername(share.getUserId() == null ? "已注销用户"
+                    : usernameMap.getOrDefault(share.getUserId(), "已注销用户"));
+            vo.setFileName(share.getItemId() == null ? "文件已删除"
+                    : fileNameMap.getOrDefault(share.getItemId(), "文件已删除"));
+            vo.setVisitCount(share.getVisitCount() == null ? 0 : share.getVisitCount());
+            vo.setStatus(share.getStatus());
+            boolean statusInvalid = share.getStatus() == null || share.getStatus() == 0;
+            boolean timeExpired = share.getExpireTime() != null && now.isAfter(share.getExpireTime());
+            vo.setExpired(statusInvalid || timeExpired);
+            if (share.getCreatedAt() != null) {
+                vo.setCreatedAt(share.getCreatedAt().toInstant().atZone(ZoneId.systemDefault()).toLocalDateTime());
+            }
+            vo.setExpireTime(share.getExpireTime());
+            list.add(vo);
+        }
+        return list;
+    }
+
+    private Map<String, Object> emptySharePage(long pageNum, long pageSize, LocalDateTime now) {
+        Map<String, Object> data = new LinkedHashMap<String, Object>();
+        data.put("list", new ArrayList<AdminShareVO>());
+        data.put("total", 0L);
+        data.put("page", pageNum);
+        data.put("pageSize", pageSize);
+        data.put("activeCount", safeCount(shareMapper.selectCount(new LambdaQueryWrapper<Share>()
+                .eq(Share::getStatus, 1)
+                .and(w -> w.isNull(Share::getExpireTime).or().gt(Share::getExpireTime, now)))));
+        return data;
+    }
+
+    private List<Long> uniqueIds(List<Long> ids) {
+        List<Long> result = new ArrayList<Long>();
+        for (Long id : ids) {
+            if (id != null && !result.contains(id)) {
+                result.add(id);
+            }
+        }
+        return result;
+    }
+
+    private Map<String, Object> batchResult(int success, int skipped, List<String> details) {
+        Map<String, Object> result = new LinkedHashMap<String, Object>();
+        result.put("success", success);
+        result.put("skipped", skipped);
+        result.put("details", details.size() > 5 ? new ArrayList<String>(details.subList(0, 5)) : details);
+        return result;
     }
 
     private User ensureAdmin(Long adminUserId) {

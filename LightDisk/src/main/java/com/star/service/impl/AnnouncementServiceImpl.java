@@ -124,6 +124,57 @@ public class AnnouncementServiceImpl implements AnnouncementService {
     }
 
     @Override
+    @Transactional
+    public int batchOperate(List<Long> ids, String action) {
+        if (ids == null || ids.isEmpty()) {
+            throw new BusinessException("请选择要操作的公告");
+        }
+        if (action == null || action.trim().isEmpty()) {
+            throw new BusinessException("请指定批量操作类型");
+        }
+        String act = action.trim();
+        if (!Arrays.asList("delete", "top", "untop", "publish", "withdraw").contains(act)) {
+            throw new BusinessException("不支持的批量操作：" + act);
+        }
+
+        int affected = 0;
+        LocalDateTime now = LocalDateTime.now();
+        for (Long id : ids) {
+            if (id == null) {
+                continue;
+            }
+            Announcement existing = announcementMapper.selectById(id);
+            if (existing == null) {
+                continue;
+            }
+            if ("delete".equals(act)) {
+                announcementMapper.deleteById(id);
+                announcementReadMapper.delete(new LambdaQueryWrapper<AnnouncementRead>()
+                        .eq(AnnouncementRead::getAnnouncementId, id));
+            } else {
+                if ("top".equals(act)) {
+                    existing.setIsTop(1);
+                } else if ("untop".equals(act)) {
+                    existing.setIsTop(0);
+                } else if ("publish".equals(act)) {
+                    existing.setStatus(1);
+                } else {
+                    existing.setStatus(2);
+                }
+                existing.setUpdatedAt(now);
+                announcementMapper.updateById(existing);
+            }
+            affected++;
+        }
+        if (affected == 0) {
+            throw new BusinessException("没有可操作的公告");
+        }
+        // 批量发布/撤回会影响所有用户的未读数 → 全量失效缓存
+        notificationService.evictAllUnreadCache();
+        return affected;
+    }
+
+    @Override
     public void toggleTop(Long id) {
         Announcement entity = announcementMapper.selectById(id);
         if (entity == null) {

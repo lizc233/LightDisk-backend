@@ -64,4 +64,29 @@ public class AnnouncementController {
         announcementService.toggleTop(id);
         return Result.success(null);
     }
+
+    @ApiOperation("批量操作：delete / top / untop / publish / withdraw")
+    @PostMapping("/batch")
+    public Result<Integer> batch(@RequestBody com.star.model.dto.AdminBatchActionDTO dto) {
+        int affected = announcementService.batchOperate(
+                dto == null ? null : dto.getIds(),
+                dto == null ? null : dto.getAction());
+        operationLogService.record(BaseContext.getCurrentId(), null, "管理", "announcement_batch",
+                String.format("批量%s公告 %d 条", actionLabel(dto == null ? null : dto.getAction()), affected), null);
+        return Result.success(affected);
+    }
+
+    private String actionLabel(String action) {
+        if (action == null) {
+            return "";
+        }
+        switch (action.trim()) {
+            case "delete": return "删除";
+            case "top": return "置顶";
+            case "untop": return "取消置顶";
+            case "publish": return "发布";
+            case "withdraw": return "撤回";
+            default: return action;
+        }
+    }
 }
