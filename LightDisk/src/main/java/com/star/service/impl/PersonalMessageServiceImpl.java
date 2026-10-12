@@ -60,6 +60,7 @@ public class PersonalMessageServiceImpl implements PersonalMessageService {
     private final UserSettingsMapper userSettingsMapper;
     private final UserContactService userContactService;
     private final com.star.service.NotificationService notificationService; // 未读缓存失效
+    private final com.star.service.OperationLogService operationLogService; // 操作日志埋点
     private final FileMapper fileMapper;
     private final StorageFileMapper storageFileMapper;
 
@@ -179,6 +180,9 @@ public class PersonalMessageServiceImpl implements PersonalMessageService {
 
         log.info("用户 [{}]{} 发送私信给 {} 人，标题: {}",
                 senderId, isAdmin ? "(管理员)" : "", messages.size(), title);
+        operationLogService.record(senderId, sender.getUsername(), "私信", "message_send",
+                String.format("发送私信「%s」给 %d 位用户", title, messages.size()),
+                messages.isEmpty() ? null : messages.get(0).getId());
         return messages;
     }
 
@@ -193,6 +197,8 @@ public class PersonalMessageServiceImpl implements PersonalMessageService {
             throw new BusinessException("无权删除此消息");
         }
         personalMessageMapper.deleteById(messageId);
+        operationLogService.record(userId, null, "私信", "message_delete",
+                String.format("删除收到的私信「%s」", msg.getTitle()), messageId);
     }
 
     @Override

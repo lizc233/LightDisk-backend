@@ -49,6 +49,7 @@ public class ShareServiceImpl extends ServiceImpl<ShareMapper, Share> implements
     private final UserSettingsMapper userSettingsMapper;
     private final StorageFileMapper storageFileMapper;
     private final UserMapper userMapper;
+    private final com.star.service.OperationLogService operationLogService;
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -94,6 +95,12 @@ public class ShareServiceImpl extends ServiceImpl<ShareMapper, Share> implements
             );
         }
 
+        operationLogService.record(currentUserId, null, "分享", "share_send",
+                String.format("创建分享「%s」，分享码 %s，有效期 %s",
+                        file.getFileName(), shareCode,
+                        shareExpireDays == null ? "永久" : shareExpireDays + " 天"),
+                share.getId());
+
         return toShareInfoVO(share);
     }
 
@@ -130,11 +137,21 @@ public class ShareServiceImpl extends ServiceImpl<ShareMapper, Share> implements
                 .eq(Share::getUserId, currentUserId));
         targetShares.forEach(share -> redisTemplate.delete(SHARE_REDIS_PREFIX + share.getShareCode()));
 
-        return this.baseMapper.update(null, new LambdaUpdateWrapper<Share>()
+        int updated = this.baseMapper.update(null, new LambdaUpdateWrapper<Share>()
                 .in(Share::getId, shareIds)
                 .eq(Share::getUserId, currentUserId)
                 .set(Share::getStatus, 0)
                 .set(Share::getDeleteTime, LocalDateTime.now()));
+
+        if (updated > 0) {
+            operationLogService.record(currentUserId, null, "分享", "share_cancel",
+                    String.format("取消了 %d 个分享（%s）", targetShares.size(),
+                            targetShares.stream()
+                                    .map(s -> String.valueOf(s.getId()))
+                                    .collect(java.util.stream.Collectors.joining("、"))),
+                    null);
+        }
+        return updated;
     }
 
     @Override

@@ -37,6 +37,16 @@ public class OperationLog {
     private String module;
 
     /**
+     * 动作类型: login / upload / download / delete / share_send / share_cancel / share_reject ...
+     */
+    private String action;
+
+    /**
+     * 关联业务ID（如分享ID）
+     */
+    private Long targetId;
+
+    /**
      * 操作内容
      */
     private String content;

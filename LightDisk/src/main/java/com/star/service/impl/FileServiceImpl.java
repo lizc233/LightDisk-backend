@@ -63,6 +63,7 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements IF
     private final SystemConfigMapper systemConfigMapper;   // 新增：用于读取内存阈值
     private final MemoryMonitor memoryMonitor;             // 新增：内存监控工具
     private final com.star.mapper.ShareMapper shareMapper; // 存储分析：分享统计
+    private final com.star.service.OperationLogService operationLogService; // 操作日志埋点
 
     @Value("${file.upload-dir:./uploads}")
     private String uploadDir;
@@ -151,6 +152,8 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements IF
             userMapper.updateById(user);
 
             log.info("文件上传成功: userId={}, fileName={}, isSec={}", userId, originalFilename, isSec);
+            operationLogService.record(userId, user.getUsername(), "文件", "upload",
+                    String.format("上传文件「%s」%s", originalFilename, isSec ? "（秒传）" : ""), userFile.getId());
             return userFile.getId();
 
         } catch (IOException e) {
@@ -170,6 +173,8 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements IF
 
         userFile.setDownloadCount(userFile.getDownloadCount() + 1);
         fileMapper.updateById(userFile);
+        operationLogService.record(userId, null, "文件", "download",
+                String.format("下载文件「%s」", userFile.getFileName()), fileId);
         return storageFile.getRealPath();
     }
 
@@ -237,6 +242,8 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements IF
         userFile.setStatus(0);
         userFile.setDeleteTime(LocalDateTime.now());
         fileMapper.updateById(userFile);
+        operationLogService.record(userId, null, "文件", "delete",
+                String.format("将文件「%s」移入回收站", userFile.getFileName()), fileId);
     }
 
     @Override
@@ -289,6 +296,9 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements IF
                 userMapper.updateById(user);
             }
         }
+
+        operationLogService.record(userId, null, "回收站", "permanent_delete",
+                String.format("彻底删除文件「%s」", userFile.getFileName()), fileId);
     }
 
     @Override
@@ -300,6 +310,8 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements IF
         userFile.setStatus(1);
         userFile.setDeleteTime(null);
         fileMapper.updateById(userFile);
+        operationLogService.record(userId, null, "回收站", "restore",
+                String.format("从回收站恢复文件「%s」", userFile.getFileName()), fileId);
     }
 
     @Override

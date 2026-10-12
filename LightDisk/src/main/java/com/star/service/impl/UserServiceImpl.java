@@ -67,6 +67,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
     private final ObjectProvider<JavaMailSender> mailSenderProvider;
     private final com.star.service.NotificationService notificationService;
     private final com.star.service.IAvatarService avatarService;
+    private final com.star.service.OperationLogService operationLogService;
 
     @Value("${lightdisk.mail.enabled:false}")
     private boolean mailEnabled;
@@ -106,6 +107,9 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         } catch (Exception e) {
             log.warn("[登录] 未读数对账失败（不影响登录）uid={}", user.getId(), e);
         }
+
+        operationLogService.record(user.getId(), user.getUsername(), "账号", "login",
+                String.format("登录成功（角色：%s）", vipConfig.getLevelName()), user.getId());
 
         return LoginVO.builder()
                 .id(user.getId())
@@ -312,6 +316,10 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         }
         user.setUpdatedAt(LocalDateTime.now());
         this.updateById(user);
+
+        operationLogService.record(userId, user.getUsername(), "会员", "vip_upgrade",
+                String.format("升级会员：%s → %s（有效期 365 天）",
+                        currentConfig.getLevelName(), nextConfig.getLevelName()), userId);
 
         return buildUserInfo(loadCurrentUser(userId), ensureUserSettings(userId));
     }

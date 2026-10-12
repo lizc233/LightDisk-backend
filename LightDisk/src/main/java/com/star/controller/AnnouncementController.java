@@ -24,6 +24,7 @@ import java.util.Map;
 public class AnnouncementController {
 
     private final AnnouncementService announcementService;
+    private final com.star.service.OperationLogService operationLogService;
 
     @ApiOperation("分页查询公告列表")
     @PostMapping("/page")
@@ -35,7 +36,11 @@ public class AnnouncementController {
     @ApiOperation("创建公告/通知")
     @PostMapping
     public Result<Announcement> create(@RequestBody AnnouncementDTO dto) {
-        return Result.success(announcementService.create(dto));
+        Announcement announcement = announcementService.create(dto);
+        operationLogService.record(BaseContext.getCurrentId(), null, "管理", "announcement_publish",
+                String.format("发布公告「%s」", dto == null || dto.getTitle() == null ? "" : dto.getTitle()),
+                announcement == null ? null : announcement.getId());
+        return Result.success(announcement);
     }
 
     @ApiOperation("编辑公告")
@@ -48,6 +53,8 @@ public class AnnouncementController {
     @DeleteMapping("/{id}")
     public Result<Void> delete(@PathVariable Long id) {
         announcementService.delete(id);
+        operationLogService.record(BaseContext.getCurrentId(), null, "管理", "announcement_delete",
+                String.format("删除公告 #%d", id), id);
         return Result.success(null);
     }
 

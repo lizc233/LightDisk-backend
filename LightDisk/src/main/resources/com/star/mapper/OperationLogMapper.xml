@@ -9,13 +9,15 @@
             <result property="userId" column="user_id" />
             <result property="username" column="username" />
             <result property="module" column="module" />
+            <result property="action" column="action" />
+            <result property="targetId" column="target_id" />
             <result property="content" column="content" />
             <result property="ip" column="ip" />
             <result property="createdAt" column="created_at" />
     </resultMap>
 
     <sql id="Base_Column_List">
-        id,user_id,username,module,content,ip,
+        id,user_id,username,module,action,target_id,content,ip,
         created_at
     </sql>
 </mapper>

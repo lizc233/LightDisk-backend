@@ -52,6 +52,7 @@ public class AdminServiceImpl implements AdminService {
     private final ShareMapper shareMapper;
     private final FileMapper fileMapper;
     private final FolderMapper folderMapper;
+    private final com.star.service.OperationLogService operationLogService;
 
     @Override
     public Map<String, Object> getDashboard(Long adminUserId) {
@@ -162,6 +163,10 @@ public class AdminServiceImpl implements AdminService {
         user.setUpdatedAt(now);
         userMapper.updateById(user);
 
+        operationLogService.record(adminUserId, null, "管理", "admin_vip_update",
+                String.format("调整用户「%s」的会员等级为 %s（%d 天）",
+                        user.getUsername(), targetConfig.getLevelName(), durationDays), user.getId());
+
         return buildUserRow(user, vipConfigMap, now);
     }
 
@@ -197,6 +202,8 @@ public class AdminServiceImpl implements AdminService {
         user.setStatus(dto.getStatus());
         user.setUpdatedAt(LocalDateTime.now());
         userMapper.updateById(user);
+        operationLogService.record(adminUserId, adminUser.getUsername(), "管理", "admin_status_update",
+                String.format("%s 账号「%s」", dto.getStatus() == 1 ? "启用" : "禁用", user.getUsername()), user.getId());
         return buildUserRow(user, loadVipConfigMap(), LocalDateTime.now());
     }
 
@@ -268,6 +275,9 @@ public class AdminServiceImpl implements AdminService {
         user.setUpdatedAt(now);
         userMapper.insert(user);
 
+        operationLogService.record(operatorId, null, "管理", "admin_add_user",
+                String.format("新增用户「%s」", user.getUsername()), user.getId());
+
         return buildUserRow(user, loadVipConfigMap(), now);
     }
 
@@ -303,6 +313,9 @@ public class AdminServiceImpl implements AdminService {
         user.setIsAdmin(after);
         user.setUpdatedAt(LocalDateTime.now());
         userMapper.updateById(user);
+        operationLogService.record(operatorId, operator.getUsername(), "管理", "admin_role_update",
+                String.format("将用户「%s」的身份由 %s 调整为 %s", user.getUsername(),
+                        describeAdminRole(before), describeAdminRole(after)), user.getId());
         return buildUserRow(user, loadVipConfigMap(), LocalDateTime.now());
     }
 
@@ -329,14 +342,21 @@ public class AdminServiceImpl implements AdminService {
         return user;
     }
 
+    private String describeAdminRole(int isAdmin) {
+        switch (isAdmin) {
+            case 2: return "超级管理员";
+            case 1: return "管理员";
+            default: return "普通用户";
+        }
+    }
+
     private User loadUser(Long userId) {
         if (userId == null) {
             throw new BusinessException("登录状态无效，请重新登录");
         }
         User user = userMapper.selectById(userId);
         if (user == null) {
-            throw new BusinessException("用户不存在");
-        }
+            throw new BusinessException("用户不存在");        }
         return user;
     }
 
