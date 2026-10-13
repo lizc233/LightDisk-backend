@@ -93,6 +93,47 @@ public class FileController {
         }
     }
 
+    /**
+     * 音频内嵌封面：解析 ID3 APIC / FLAC PICTURE / MP4 covr，按物理文件 MD5 缓存为 jpg。
+     * 与缩略图一样，前端 {@code <img src>} 带不了请求头，沿用 token 查询参数。
+     * 无封面 / 解析失败统一返回 404，前端回落到通用音符图标。
+     */
+    @GetMapping("/audio-cover/{fileId}")
+    public void audioCover(@PathVariable Long fileId,
+                           @RequestParam(value = "size", required = false) Integer size,
+                           HttpServletResponse response) {
+        try {
+            Long userId = BaseContext.getCurrentId();
+            String coverPath = thumbnailService.resolveAudioCoverPath(fileId, userId, size);
+            if (coverPath == null) {
+                response.setStatus(404);
+                return;
+            }
+            java.io.File coverFile = new java.io.File(coverPath);
+            if (!coverFile.exists()) {
+                response.setStatus(404);
+                return;
+            }
+            response.setContentType("image/jpeg");
+            response.setContentLengthLong(coverFile.length());
+            response.setHeader("Cache-Control", "private, max-age=604800");
+            try (InputStream inputStream = new FileInputStream(coverFile);
+                 OutputStream outputStream = response.getOutputStream()) {
+                byte[] buffer = new byte[8192];
+                int bytesRead;
+                while ((bytesRead = inputStream.read(buffer)) != -1) {
+                    outputStream.write(buffer, 0, bytesRead);
+                }
+                outputStream.flush();
+            }
+        } catch (Exception e) {
+            log.warn("读取音频封面失败: fileId={}, reason={}", fileId, e.getMessage());
+            if (!response.isCommitted()) {
+                response.setStatus(404);
+            }
+        }
+    }
+
     @PostMapping("/upload")
     public Result<Long> upload(
             @RequestParam("file") MultipartFile file,

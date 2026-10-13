@@ -42,6 +42,10 @@ public class ThumbnailService {
     private static final Set<String> THUMBABLE_EXTS = new HashSet<>(Arrays.asList(
             "png", "jpg", "jpeg", "gif", "bmp"));
 
+    /** 可解析 ID3/封面 的音频扩展名（wma/ogg 的内嵌图支持有限，交给前端回落图标） */
+    private static final Set<String> AUDIO_EXTS = new HashSet<>(Arrays.asList(
+            "mp3", "flac", "m4a", "aac", "wav"));
+
     /** 超过该体积的原图不生成缩略图（避免解码大图把内存打满） */
     private static final long MAX_SOURCE_SIZE = 30L * 1024 * 1024;
 
@@ -87,6 +91,133 @@ public class ThumbnailService {
             return cachePath.toString();
         }
         return generate(storage.getRealPath(), cachePath, maxSize);
+    }
+
+    /**
+     * 取音频内嵌封面（ID3 APIC 帧）并缓存为 jpg；无封面 / 解析失败返回 {@code null}。
+     *
+     * <p>缓存键与图片缩略图共用 {@code .thumbnails/} 目录，但前缀加 {@code audio_}，
+     * 避免与同名 MD5 的图片缩略图冲突。封面图内容由音频物理文件决定，天然不可变。
+     */
+    public String resolveAudioCoverPath(Long fileId, Long userId, Integer size) {
+        if (fileId == null) {
+            return null;
+        }
+        File userFile = fileMapper.selectById(fileId);
+        if (userFile == null || !userFile.getUserId().equals(userId)) {
+            return null;
+        }
+        String ext = extOf(userFile.getFileName());
+        if (!AUDIO_EXTS.contains(ext)) {
+            return null;
+        }
+        StorageFile storage = storageFileMapper.selectById(userFile.getStorageId());
+        if (storage == null || storage.getRealPath() == null || storage.getFileMd5() == null) {
+            return null;
+        }
+        int maxSize = normalizeSize(size);
+
+        Path cachePath = Paths.get(uploadDir, THUMB_DIR_NAME,
+                "audio_" + storage.getFileMd5() + "_" + maxSize + ".jpg");
+        if (Files.exists(cachePath)) {
+            return cachePath.toString();
+        }
+        // ⚠️ 物理文件按内容寻址存储、**没有扩展名**，而 jaudiotagger 的 read(File) 是
+        // 按扩展名派发 Reader 的（会抛 "No Reader associated with this extension"）。
+        // 因此必须用 readAs(file, ext) 显式告诉它格式，ext 取自用户可见的文件名。
+        byte[] raw = readEmbeddedArtwork(storage.getRealPath(), ext);
+        if (raw == null || raw.length == 0) {
+            return null;
+        }
+        return writeCoverCache(raw, cachePath, maxSize);
+    }
+
+    /**
+     * 从音频文件中读出内嵌封面原始字节（任意格式）。
+     *
+     * <p>用 jaudiotagger 统一处理 ID3v2(APIC) / FLAC(PICTURE) / MP4(covr)，
+     * 解析失败一律返回 null，绝不向业务层抛异常。
+     *
+     * @param ext 音频真实扩展名（mp3/flac/…），用于显式指定解析器
+     */
+    private byte[] readEmbeddedArtwork(String sourcePath, String ext) {
+        java.io.File source = new java.io.File(sourcePath);
+        if (!source.exists() || !source.isFile()) {
+            return null;
+        }
+        try {
+            org.jaudiotagger.audio.AudioFile audioFile =
+                    org.jaudiotagger.audio.AudioFileIO.readAs(source, ext);
+            org.jaudiotagger.tag.Tag tag = audioFile.getTag();
+            if (tag == null) {
+                return null;
+            }
+            org.jaudiotagger.tag.images.Artwork artwork = firstArtwork(tag);
+            if (artwork == null) {
+                return null;
+            }
+            return artwork.getBinaryData();
+        } catch (Exception e) {
+            log.warn("解析音频封面失败: source={}, ext={}, reason={}", sourcePath, ext, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * 取第一张封面。jaudiotagger 3.x 的 {@code getFirstArtwork()} 在
+     * 部分格式（如 FLAC）下可能抛 {@code KeyNotFoundException}，故显式捕获并回落。
+     */
+    private org.jaudiotagger.tag.images.Artwork firstArtwork(org.jaudiotagger.tag.Tag tag) {
+        try {
+            return tag.getFirstArtwork();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** 把封面原始字节写进缓存；非法图片 / 写出失败返回 null（前端回落图标） */
+    private String writeCoverCache(byte[] raw, Path cachePath, int maxSize) {
+        Path tempPath = null;
+        try {
+            java.awt.image.BufferedImage src = javax.imageio.ImageIO.read(new java.io.ByteArrayInputStream(raw));
+            if (src == null) {
+                // 不是可解码的位图（或为 webp 等 ImageIO 不支持的格式）
+                return null;
+            }
+            Files.createDirectories(cachePath.getParent());
+            tempPath = cachePath.resolveSibling(
+                    cachePath.getFileName().toString() + "." + ThreadLocalRandom.current().nextInt(100000) + ".tmp.jpg");
+
+            Thumbnails.of(src)
+                    .size(maxSize, maxSize)
+                    .imageType(BufferedImage.TYPE_INT_RGB)
+                    .outputFormat("jpg")
+                    .outputQuality(0.82)
+                    .toFile(tempPath.toFile());
+
+            if (!Files.exists(tempPath) || Files.size(tempPath) <= 0L) {
+                throw new IOException("封面写出结果为空");
+            }
+            try {
+                Files.move(tempPath, cachePath, StandardCopyOption.REPLACE_EXISTING);
+            } catch (IOException moveError) {
+                if (!Files.exists(cachePath)) {
+                    throw moveError;
+                }
+            }
+            return cachePath.toString();
+        } catch (Exception e) {
+            log.warn("写出音频封面缓存失败: cache={}, reason={}", cachePath, e.getMessage());
+            return null;
+        } finally {
+            if (tempPath != null) {
+                try {
+                    Files.deleteIfExists(tempPath);
+                } catch (IOException ignore) {
+                    // 清理失败不影响主流程
+                }
+            }
+        }
     }
 
     /** 生成缩略图；成功返回路径，失败返回 null（绝不向业务层抛异常） */

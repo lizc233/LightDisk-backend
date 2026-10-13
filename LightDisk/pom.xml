@@ -96,6 +96,13 @@
             <version>0.4.20</version>
         </dependency>
 
+        <!-- 音频元数据：读取 mp3/flac/m4a 的 ID3 标签与 APIC 内嵌封面（兼容 Java 8） -->
+        <dependency>
+            <groupId>net.jthink</groupId>
+            <artifactId>jaudiotagger</artifactId>
+            <version>3.0.1</version>
+        </dependency>
+
     </dependencies>
 
 
