@@ -17,6 +17,13 @@ public interface IFileService extends IService<File> {
 
     String downloadFile(Long fileId, Long userId);
 
+    /**
+     * 只读解析物理存储：校验文件归属后返回 storage_file 记录。
+     * 用于在线预览 / 音视频流式播放 / 下载断点续传等场景——
+     * 这些场景不应累加 downloadCount，也不应每次 Range 请求都写一条操作日志。
+     */
+    com.star.model.entity.StorageFile resolveStorage(Long fileId, Long userId);
+
     List<FileListVO> getFileList(Long folderId, Long userId);
 
     void moveFileToFolder(Long fileId, Long targetFolderId, Long userId);

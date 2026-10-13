@@ -15,6 +15,7 @@ import com.star.service.DocPreviewService;
 import com.star.service.IFileService;
 import com.star.service.ThumbnailService;
 import com.star.utils.JwtUtils;
+import com.star.utils.RangeFileWriter;
 import io.swagger.annotations.Api;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -102,13 +103,27 @@ public class FileController {
         return Result.success(fileId);
     }
 
+    /**
+     * 文件下载。
+     *
+     * <p>支持 HTTP Range：带 {@code Range} 头时返回 206，用于下载工具/浏览器的断点续传；
+     * 此时属于同一份文件的续传请求，不再重复累加下载次数与操作日志。</p>
+     */
     @GetMapping("/download/{fileId}")
     public void download(@PathVariable Long fileId,
                          HttpServletRequest request,
                          HttpServletResponse response) {
 
         Long userId = BaseContext.getCurrentId();
-        String filePath = fileService.downloadFile(fileId, userId);
+        String rangeHeader = request.getHeader("Range");
+        boolean ranged = rangeHeader != null && !rangeHeader.trim().isEmpty();
+
+        String filePath;
+        if (ranged) {
+            filePath = fileService.resolveStorage(fileId, userId).getRealPath();
+        } else {
+            filePath = fileService.downloadFile(fileId, userId);
+        }
 
         com.star.model.entity.File userFile = fileService.getById(fileId);
         String realFileName = userFile.getFileName();
@@ -119,24 +134,20 @@ public class FileController {
             return;
         }
 
-        try (InputStream inputStream = new FileInputStream(file);
-             OutputStream outputStream = response.getOutputStream()) {
-
-            response.setContentType("application/octet-stream");
-            response.setHeader("Content-Disposition", "attachment; filename=\"" + java.net.URLEncoder.encode(realFileName, "UTF-8") + "\"");
-            response.setContentLengthLong(file.length());
-
-
-            byte[] buffer = new byte[8192];
-            int bytesRead;
-            while ((bytesRead = inputStream.read(buffer)) != -1) {
-                outputStream.write(buffer, 0, bytesRead);
-            }
-            outputStream.flush();
-
+        try {
+            String etag = buildEtag(fileService.resolveStorage(fileId, userId).getFileMd5());
+            RangeFileWriter.write(request, response, file, realFileName, false, etag);
         } catch (IOException e) {
             log.error("文件下载失败", e);
+            if (!response.isCommitted()) {
+                response.setStatus(500);
+            }
         }
+    }
+
+    /** 内容寻址项目里物理文件 MD5 天然是内容的唯一标识，最适合做 ETag */
+    private String buildEtag(String md5) {
+        return (md5 == null || md5.isEmpty()) ? null : "\"" + md5 + "\"";
     }
 
     @PostMapping("/list") // 改用 Post 方便传复杂的 JSON，或者用 Get 配合 @ModelAttribute
@@ -323,44 +334,38 @@ public class FileController {
         return Result.success(null);
     }
 
+    /**
+     * 在线预览 / 音视频流式播放。
+     *
+     * <p>支持 HTTP Range：浏览器 video/audio 标签会先探测（无 Range）再按需拉取区间，
+     * 拖动进度条时只请求目标偏移之后的数据，无需从头下载整个文件。</p>
+     *
+     * <p>该接口不累加下载次数、不写下载日志——预览不属于下载行为。</p>
+     */
     @GetMapping("/preview/{fileId}")
     public void preview(@PathVariable Long fileId,
                          HttpServletRequest request,
                          HttpServletResponse response) {
         Long userId = BaseContext.getCurrentId();
-        String filePath = fileService.downloadFile(fileId, userId);
+        com.star.model.entity.StorageFile storage = fileService.resolveStorage(fileId, userId);
 
         com.star.model.entity.File userFile = fileService.getById(fileId);
         String realFileName = userFile.getFileName();
 
-        java.io.File file = new java.io.File(filePath);
+        java.io.File file = new java.io.File(storage.getRealPath());
         if (!file.exists()) {
             response.setStatus(404);
             return;
         }
 
-        try (InputStream inputStream = new FileInputStream(file);
-             OutputStream outputStream = response.getOutputStream()) {
-
-            String contentType = request.getServletContext().getMimeType(realFileName);
-            if (contentType == null) {
-                contentType = "application/octet-stream"; // 兜底
-            }
-
-            response.setContentType(contentType);
-            response.setHeader("Content-Disposition", "inline; filename=\"" + java.net.URLEncoder.encode(realFileName, "UTF-8") + "\"");
-
-            response.setContentLengthLong(file.length());
-
-            byte[] buffer = new byte[8192];
-            int bytesRead;
-            while ((bytesRead = inputStream.read(buffer)) != -1) {
-                outputStream.write(buffer, 0, bytesRead);
-            }
-            outputStream.flush();
-
+        try {
+            RangeFileWriter.write(request, response, file, realFileName, true,
+                    buildEtag(storage.getFileMd5()));
         } catch (IOException e) {
-            log.error("文件下载失败", e);
+            log.error("文件预览失败", e);
+            if (!response.isCommitted()) {
+                response.setStatus(500);
+            }
         }
     }
 

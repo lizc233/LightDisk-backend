@@ -186,6 +186,17 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements IF
     }
 
     @Override
+    public StorageFile resolveStorage(Long fileId, Long userId) {
+        File userFile = fileMapper.selectById(fileId);
+        if (userFile == null) throw new BusinessException("文件不存在");
+        if (!userFile.getUserId().equals(userId)) throw new BusinessException("无权访问此文件");
+
+        StorageFile storageFile = storageFileMapper.selectById(userFile.getStorageId());
+        if (storageFile == null) throw new BusinessException("物理文件不存在");
+        return storageFile;
+    }
+
+    @Override
     public List<FileListVO> getFileList(Long folderId, Long userId) {
         List<Folder> folders = folderMapper.selectList(
                 new LambdaQueryWrapper<Folder>()
@@ -575,17 +586,48 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements IF
                 fileWrapper.orderByDesc(File::getCreatedAt); // 假设以创建时间作为最近依据
             }
 
-            // 2. 如果指定了分类，通过文件后缀进行模糊匹配
+            // 2. 如果指定了分类，按扩展名匹配
+            //    注意用 likeLeft（即 LIKE '%.ext'）保证真的匹配到结尾，
+            //    用 like 会两头模糊，出现「a.jpg.txt 被当成图片」这类误判
             if (query.getCategory() != null) {
                 switch (query.getCategory()) {
                     case "image":
-                        fileWrapper.and(w -> w.like(File::getFileName, ".jpg").or().like(File::getFileName, ".png"));
+                        fileWrapper.and(w -> w.likeLeft(File::getFileName, ".jpg")
+                                .or().likeLeft(File::getFileName, ".jpeg")
+                                .or().likeLeft(File::getFileName, ".png")
+                                .or().likeLeft(File::getFileName, ".gif")
+                                .or().likeLeft(File::getFileName, ".webp")
+                                .or().likeLeft(File::getFileName, ".bmp")
+                                .or().likeLeft(File::getFileName, ".svg"));
                         break;
                     case "doc":
-                        fileWrapper.and(w -> w.like(File::getFileName, ".pdf").or().like(File::getFileName, ".doc"));
+                        fileWrapper.and(w -> w.likeLeft(File::getFileName, ".pdf")
+                                .or().likeLeft(File::getFileName, ".doc")
+                                .or().likeLeft(File::getFileName, ".docx")
+                                .or().likeLeft(File::getFileName, ".xls")
+                                .or().likeLeft(File::getFileName, ".xlsx")
+                                .or().likeLeft(File::getFileName, ".ppt")
+                                .or().likeLeft(File::getFileName, ".pptx")
+                                .or().likeLeft(File::getFileName, ".txt")
+                                .or().likeLeft(File::getFileName, ".md"));
                         break;
                     case "video":
-                        fileWrapper.and(w -> w.like(File::getFileName, ".mp4"));
+                        fileWrapper.and(w -> w.likeLeft(File::getFileName, ".mp4")
+                                .or().likeLeft(File::getFileName, ".avi")
+                                .or().likeLeft(File::getFileName, ".mov")
+                                .or().likeLeft(File::getFileName, ".mkv")
+                                .or().likeLeft(File::getFileName, ".webm"));
+                        break;
+                    case "audio":
+                        fileWrapper.and(w -> w.likeLeft(File::getFileName, ".mp3")
+                                .or().likeLeft(File::getFileName, ".flac")
+                                .or().likeLeft(File::getFileName, ".wav")
+                                .or().likeLeft(File::getFileName, ".aac")
+                                .or().likeLeft(File::getFileName, ".m4a")
+                                .or().likeLeft(File::getFileName, ".ogg")
+                                .or().likeLeft(File::getFileName, ".wma"));
+                        break;
+                    default:
                         break;
                 }
             }
