@@ -388,6 +388,12 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         data.put("createdAt", user.getCreatedAt());
         data.put("maxBatchUpload", currentConfig.getMaxBatchUpload());
         data.put("downloadSpeedLimit", currentConfig.getDownloadSpeedLimit());
+        data.put("maxVideoQuality", currentConfig.getMaxVideoQuality() == null
+                ? 360 : currentConfig.getMaxVideoQuality());
+        data.put("maxPlaybackRate", currentConfig.getMaxPlaybackRate() == null
+                ? 1.0 : currentConfig.getMaxPlaybackRate().doubleValue());
+        data.put("maxConcurrentStream", currentConfig.getMaxConcurrentStream() == null
+                ? 1 : currentConfig.getMaxConcurrentStream());
         data.put("upgradePrice", 99);
         data.put("isTopLevel", nextConfig.getLevel().equals(currentConfig.getLevel()));
         data.put("nextLevel", nextConfig.getLevel());

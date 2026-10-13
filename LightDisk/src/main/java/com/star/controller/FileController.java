@@ -42,6 +42,7 @@ public class FileController {
     private final IFileService fileService;
     private final DocPreviewService docPreviewService;
     private final ThumbnailService thumbnailService;
+    private final com.star.service.IVideoTranscodeService videoTranscodeService;
 
     /** 旧版 .doc 在线预览：后端 POI HWPF 解析后返回 HTML / 纯文本 */
     @GetMapping("/{fileId}/doc-preview")
@@ -100,7 +101,27 @@ public class FileController {
 
         Long userId = BaseContext.getCurrentId();
         Long fileId = fileService.uploadFile(file, folderId, userId);
+        tryAutoTranscode(fileId, file.getOriginalFilename(), userId);
         return Result.success(fileId);
+    }
+
+    /**
+     * 视频上传后自动投递转码任务（失败静默：转码是增强能力，不能影响上传主流程）。
+     * 前端也可以通过 /api/video/{fileId}/transcode 手动触发/重试。
+     */
+    private void tryAutoTranscode(Long fileId, String fileName, Long userId) {
+        try {
+            String lower = fileName == null ? "" : fileName.toLowerCase();
+            String[] exts = {".mp4", ".mov", ".mkv", ".avi", ".flv", ".wmv", ".webm", ".m4v", ".mpg", ".mpeg", ".ts"};
+            for (String ext : exts) {
+                if (lower.endsWith(ext)) {
+                    videoTranscodeService.submit(fileId, userId);
+                    return;
+                }
+            }
+        } catch (Exception e) {
+            log.warn("自动提交转码失败（不影响上传）: fileId={}, err={}", fileId, e.getMessage());
+        }
     }
 
     /**
@@ -322,6 +343,12 @@ public class FileController {
                                         HttpServletRequest request) {
         Long userId = BaseContext.getCurrentId();
         fileService.permanentDeleteFile(fileId, userId);
+        // 同步清理该文件的 HLS 转码产物（物理文件已删除，产物留着没意义）
+        try {
+            videoTranscodeService.purge(fileId);
+        } catch (Exception e) {
+            log.warn("清理转码产物失败: fileId={}, err={}", fileId, e.getMessage());
+        }
         return Result.success(null);
     }
 

@@ -2,6 +2,8 @@ package com.star.mapper;
 
 import com.star.model.entity.VipConfig;
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 
 /**
 * @author Lizc233
@@ -11,6 +13,12 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 */
 public interface VipConfigMapper extends BaseMapper<VipConfig> {
 
+    /**
+     * 通过用户 ID 取等级（role），查不到返回 null。
+     * 用于 VIP 权限矩阵校验，避免与 UserService 循环依赖。
+     */
+    @Select("SELECT `role` FROM `user` WHERE `id` = #{userId}")
+    Integer selectRoleByUserId(@Param("userId") Long userId);
 }
 
 

@@ -45,6 +45,9 @@ public class RabbitMQConfig {
     /** 操作日志队列（预留） */
     public static final String OPERATION_LOG = "lightdisk.operation.log";
 
+    /** 视频转码队列 */
+    public static final String QUEUE_VIDEO_TRANSCODE = "lightdisk.video.transcode";
+
     // ==================== Queue Bean ====================
 
     @Bean
@@ -67,6 +70,11 @@ public class RabbitMQConfig {
         return new Queue(OPERATION_LOG, true, false, false);
     }
 
+    @Bean
+    public Queue videoTranscodeQueue() {
+        return new Queue(QUEUE_VIDEO_TRANSCODE, true, false, false);
+    }
+
     // ==================== Binding ====================
 
     @Bean
@@ -87,6 +95,11 @@ public class RabbitMQConfig {
     @Bean
     public Binding bindOperationLog(DirectExchange exchange, Queue operationLogQueue) {
         return BindingBuilder.bind(operationLogQueue).to(exchange).with("operation.log");
+    }
+
+    @Bean
+    public Binding bindVideoTranscode(DirectExchange exchange, Queue videoTranscodeQueue) {
+        return BindingBuilder.bind(videoTranscodeQueue).to(exchange).with("video.transcode");
     }
 
     // ==================== 消息转换器（JSON） ====================

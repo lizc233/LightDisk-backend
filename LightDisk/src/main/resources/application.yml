@@ -88,3 +88,20 @@ lightdisk:
     # 未读数：待落库队列刷盘间隔 / 全量对账间隔（毫秒）
     flush-interval: 2000
     reconcile-interval: 180000
+
+  # ===== 视频转码（FFmpeg → HLS 多清晰度） =====
+  transcode:
+    enabled: true
+    # ffmpeg / ffprobe 可执行文件；留空则尝试从 PATH 查找
+    ffmpeg-path: D:/ffmpeg-8.1.2-essentials_build/bin/ffmpeg.exe
+    ffprobe-path: D:/ffmpeg-8.1.2-essentials_build/bin/ffprobe.exe
+    # HLS 产物目录（相对 file.upload-dir 或绝对路径）
+    output-dir: E:/lightdisk_data/uploads/.hls
+    # 单文件转码超时（秒）
+    timeout-seconds: 3600
+    # 最大并发转码任务数（超出排队）
+    max-concurrent: 2
+    # 源视频短于该秒数则跳过转码，直接原文件播放
+    min-duration-seconds: 1
+    # HLS 分片时长（秒）
+    segment-seconds: 6

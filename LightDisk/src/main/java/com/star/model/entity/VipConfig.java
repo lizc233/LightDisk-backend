@@ -37,6 +37,21 @@ public class VipConfig {
      */
     private Integer downloadSpeedLimit;
 
+    /**
+     * 允许的最高清晰度高度(px)：360/720/1080
+     */
+    private Integer maxVideoQuality;
+
+    /**
+     * 允许的最大播放倍速（1.00 表示不支持倍速）
+     */
+    private java.math.BigDecimal maxPlaybackRate;
+
+    /**
+     * 同时播放流上限
+     */
+    private Integer maxConcurrentStream;
+
     @Override
     public boolean equals(Object that) {
         if (this == that) {
@@ -53,7 +68,10 @@ public class VipConfig {
             && (this.getLevelName() == null ? other.getLevelName() == null : this.getLevelName().equals(other.getLevelName()))
             && (this.getMaxSpace() == null ? other.getMaxSpace() == null : this.getMaxSpace().equals(other.getMaxSpace()))
             && (this.getMaxBatchUpload() == null ? other.getMaxBatchUpload() == null : this.getMaxBatchUpload().equals(other.getMaxBatchUpload()))
-            && (this.getDownloadSpeedLimit() == null ? other.getDownloadSpeedLimit() == null : this.getDownloadSpeedLimit().equals(other.getDownloadSpeedLimit()));
+            && (this.getDownloadSpeedLimit() == null ? other.getDownloadSpeedLimit() == null : this.getDownloadSpeedLimit().equals(other.getDownloadSpeedLimit()))
+            && (this.getMaxVideoQuality() == null ? other.getMaxVideoQuality() == null : this.getMaxVideoQuality().equals(other.getMaxVideoQuality()))
+            && (this.getMaxPlaybackRate() == null ? other.getMaxPlaybackRate() == null : this.getMaxPlaybackRate().equals(other.getMaxPlaybackRate()))
+            && (this.getMaxConcurrentStream() == null ? other.getMaxConcurrentStream() == null : this.getMaxConcurrentStream().equals(other.getMaxConcurrentStream()));
     }
 
     @Override
@@ -65,6 +83,9 @@ public class VipConfig {
         result = prime * result + ((getMaxSpace() == null) ? 0 : getMaxSpace().hashCode());
         result = prime * result + ((getMaxBatchUpload() == null) ? 0 : getMaxBatchUpload().hashCode());
         result = prime * result + ((getDownloadSpeedLimit() == null) ? 0 : getDownloadSpeedLimit().hashCode());
+        result = prime * result + ((getMaxVideoQuality() == null) ? 0 : getMaxVideoQuality().hashCode());
+        result = prime * result + ((getMaxPlaybackRate() == null) ? 0 : getMaxPlaybackRate().hashCode());
+        result = prime * result + ((getMaxConcurrentStream() == null) ? 0 : getMaxConcurrentStream().hashCode());
         return result;
     }
 
@@ -79,6 +100,9 @@ public class VipConfig {
         sb.append(", maxSpace=").append(maxSpace);
         sb.append(", maxBatchUpload=").append(maxBatchUpload);
         sb.append(", downloadSpeedLimit=").append(downloadSpeedLimit);
+        sb.append(", maxVideoQuality=").append(maxVideoQuality);
+        sb.append(", maxPlaybackRate=").append(maxPlaybackRate);
+        sb.append(", maxConcurrentStream=").append(maxConcurrentStream);
         sb.append("]");
         return sb.toString();
     }

@@ -30,10 +30,25 @@ import java.util.Map;
 public class AdminController {
 
     private final AdminService adminService;
+    private final com.star.service.IQoeService qoeService;
+    private final com.star.service.IVideoTranscodeService videoTranscodeService;
 
     @GetMapping("/dashboard")
     public Result<Map<String, Object>> getDashboard() {
         return Result.success(adminService.getDashboard(BaseContext.getCurrentId()));
+    }
+
+    /** 播放质量看板（首帧耗时 / 卡顿率 / 清晰度分布 / Top 问题视频） */
+    @GetMapping("/qoe/dashboard")
+    public Result<Map<String, Object>> qoeDashboard(
+            @RequestParam(required = false, defaultValue = "7") Integer days) {
+        return Result.success(qoeService.dashboard(days == null ? 7 : days));
+    }
+
+    /** 转码队列概览 */
+    @GetMapping("/transcode/overview")
+    public Result<Map<String, Object>> transcodeOverview() {
+        return Result.success(videoTranscodeService.overview());
     }
 
     @PostMapping("/users/page")
