@@ -85,6 +85,8 @@ public class VideoTranscodeServiceImpl implements IVideoTranscodeService {
     private static final Pattern HEIGHT = Pattern.compile("\"height\"\\s*:\\s*(\\d+)");
     private static final Pattern BITRATE = Pattern.compile("\"bit_rate\"\\s*:\\s*\"(\\d+)\"");
     private static final Pattern CODEC = Pattern.compile("\"codec_name\"\\s*:\\s*\"([a-zA-Z0-9_]+)\"");
+    /** ffmpeg -stats 进度行中的 time=HH:MM:SS.xx（小时可超过 2 位） */
+    private static final Pattern FFMPEG_TIME = Pattern.compile("time=(\\d+):(\\d+):(\\d+(?:\\.\\d+)?)");
 
     private synchronized Semaphore gate() {
         int size = Math.max(1, properties.getMaxConcurrent());
@@ -278,7 +280,10 @@ public class VideoTranscodeServiceImpl implements IVideoTranscodeService {
                     targetHeight = srcHeight % 2 == 0 ? srcHeight : srcHeight - 1;
                 }
 
-                boolean ok = runFfmpeg(source, outDir, variantName, targetHeight, bitrate, audioBitrate, task);
+                boolean ok = runFfmpeg(source, outDir, variantName, targetHeight, bitrate, audioBitrate, task,
+                        probe.containsKey("durationMs") ? ((Number) probe.get("durationMs")).doubleValue() : 0d,
+                        5 + (int) Math.round(i * 90.0 / ladder.size()),
+                        (int) Math.round(90.0 / ladder.size()));
                 if (!ok) {
                     log.warn("【转码】档位 {} 失败，跳过: fileId={}", variantName, task.getFileId());
                     continue;
@@ -295,7 +300,8 @@ public class VideoTranscodeServiceImpl implements IVideoTranscodeService {
                 Path segDir = outDir.resolve(variantName);
                 totalSize += sizeOf(segDir);
 
-                int progress = (int) Math.round((i + 1) * 90.0 / ladder.size());
+                // 档位完成进度：与 runFfmpeg 的区间一致（探测 5% + 各档位均分 90%）
+                int progress = 5 + (int) Math.round((i + 1) * 90.0 / ladder.size());
                 updateProgress(task.getId(), progress, "已完成 " + variantName);
             }
 
@@ -432,7 +438,8 @@ public class VideoTranscodeServiceImpl implements IVideoTranscodeService {
      */
     private boolean runFfmpeg(Path source, Path outDir, String variantName,
                               int height, int videoBitrate, int audioBitrate,
-                              VideoTranscodeTask task) {
+                              VideoTranscodeTask task,
+                              double durationMs, int baseProgress, int spanProgress) {
         Path variantDir = outDir.resolve(variantName);
         // ⚠️ ffmpeg 不会自动创建分片子目录，必须先建好，否则报 -2 No such file or directory
         try {
@@ -446,7 +453,8 @@ public class VideoTranscodeServiceImpl implements IVideoTranscodeService {
 
         List<String> cmd = new ArrayList<String>();
         cmd.add(ffmpeg());
-        cmd.addAll(Arrays.asList("-y", "-hide_banner", "-loglevel", "error"));
+        // -stats：即使 loglevel=error 也输出进度统计行（time=...），供实时进度解析
+        cmd.addAll(Arrays.asList("-y", "-hide_banner", "-loglevel", "error", "-stats"));
         cmd.addAll(Arrays.asList("-i", source.toAbsolutePath().toString()));
 
         // 缩放：宽度自适应，保持偶数
@@ -471,7 +479,39 @@ public class VideoTranscodeServiceImpl implements IVideoTranscodeService {
                 playlist.toAbsolutePath().toString()
         ));
 
-        int code = runProcess(cmd, properties.getTimeoutSeconds());
+        // 实时进度：解析 ffmpeg 统计行的 time=HH:MM:SS.xx，映射到该档位的进度区间
+        double durationSec = durationMs > 0 ? durationMs / 1000.0 : 0;
+        final int base = baseProgress;
+        final int span = spanProgress;
+        final double[] lastWrite = {base};
+        final long[] lastTime = {0L};
+
+        int code = runProcess(cmd, properties.getTimeoutSeconds(), line -> {
+            if (durationSec <= 0 || line == null) {
+                return;
+            }
+            java.util.regex.Matcher m = FFMPEG_TIME.matcher(line);
+            if (!m.find()) {
+                return;
+            }
+            try {
+                double sec = Integer.parseInt(m.group(1)) * 3600d
+                        + Integer.parseInt(m.group(2)) * 60d
+                        + Double.parseDouble(m.group(3));
+                int percent = base + (int) Math.min(span - 1,
+                        Math.round(sec / durationSec * (span - 1)));
+                long now = System.currentTimeMillis();
+                // 节流：进度变化不足 2% 且距上次写库不足 1 秒时跳过
+                if (percent - lastWrite[0] < 2 && now - lastTime[0] < 1000) {
+                    return;
+                }
+                lastWrite[0] = percent;
+                lastTime[0] = now;
+                updateProgress(task.getId(), percent, "转码中 " + variantName);
+            } catch (NumberFormatException ignore) {
+                // 统计行解析失败不影响转码
+            }
+        });
         if (code != 0) {
             log.warn("【转码】ffmpeg 退出码 {}: fileId={}, variant={}", code, task.getFileId(), variantName);
             return false;
@@ -660,18 +700,30 @@ public class VideoTranscodeServiceImpl implements IVideoTranscodeService {
 
     /** 执行并等待结束，返回退出码（-1 表示超时/异常） */
     private int runProcess(List<String> cmd, long timeoutSeconds) {
+        return runProcess(cmd, timeoutSeconds, null);
+    }
+
+    /** 带逐行输出回调的进程执行（回调线程为守护线程，随进程结束退出） */
+    private int runProcess(List<String> cmd, long timeoutSeconds, java.util.function.Consumer<String> onLine) {
         Process process = null;
         try {
             ProcessBuilder pb = new ProcessBuilder(cmd);
             pb.redirectErrorStream(true);
             process = pb.start();
-            // 消费输出，避免缓冲区写满导致阻塞
+            // 消费输出，避免缓冲区写满导致阻塞；onLine 供实时进度解析
             final Process p = process;
             Thread drain = new Thread(() -> {
                 try (BufferedReader br = new BufferedReader(
                         new InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8))) {
-                    while (br.readLine() != null) {
-                        // discard
+                    String line;
+                    while ((line = br.readLine()) != null) {
+                        if (onLine != null) {
+                            try {
+                                onLine.accept(line);
+                            } catch (Exception ignore) {
+                                // 回调异常不影响转码
+                            }
+                        }
                     }
                 } catch (IOException ignore) {
                     // ignore

@@ -69,6 +69,8 @@ CREATE TABLE IF NOT EXISTS `play_qoe_log` (
 --    说明：max_video_quality = 允许的最高清晰度高度（360/720/1080），0 表示只能看最低档
 --         max_playback_rate = 允许的最大倍速（1.00 表示不允许倍速）
 --         max_concurrent_stream = 同时进行的播放流数量上限
+--    2026-10-13 调整：倍速不再作为等级差异（所有等级均可 0.5x~2.0x），
+--                    等级差异只体现在「清晰度上限 / 并发流上限」上
 -- ---------------------------------------------------------------------
 ALTER TABLE `vip_config`
   ADD COLUMN `max_video_quality`     INT   NOT NULL DEFAULT 360  COMMENT '允许的最高清晰度高度(px)：360/720/1080' AFTER `download_speed_limit`,
@@ -76,10 +78,13 @@ ALTER TABLE `vip_config`
   ADD COLUMN `max_concurrent_stream` INT   NOT NULL DEFAULT 1    COMMENT '同时播放流上限' AFTER `max_playback_rate`;
 
 -- 权限矩阵默认值（按现有等级阶梯）
-UPDATE `vip_config` SET `max_video_quality` = 360,  `max_playback_rate` = 1.00, `max_concurrent_stream` = 1 WHERE `level` = 0;
-UPDATE `vip_config` SET `max_video_quality` = 720,  `max_playback_rate` = 1.25, `max_concurrent_stream` = 2 WHERE `level` = 1;
-UPDATE `vip_config` SET `max_video_quality` = 1080, `max_playback_rate` = 1.50, `max_concurrent_stream` = 3 WHERE `level` = 2;
+UPDATE `vip_config` SET `max_video_quality` = 360,  `max_playback_rate` = 2.00, `max_concurrent_stream` = 1 WHERE `level` = 0;
+UPDATE `vip_config` SET `max_video_quality` = 720,  `max_playback_rate` = 2.00, `max_concurrent_stream` = 2 WHERE `level` = 1;
+UPDATE `vip_config` SET `max_video_quality` = 1080, `max_playback_rate` = 2.00, `max_concurrent_stream` = 3 WHERE `level` = 2;
 UPDATE `vip_config` SET `max_video_quality` = 1080, `max_playback_rate` = 2.00, `max_concurrent_stream` = 5 WHERE `level` = 3;
+
+-- 兼容已在库中执行过旧脚本的环境（幂等：直接修正倍速上限）
+UPDATE `vip_config` SET `max_playback_rate` = 2.00 WHERE `max_playback_rate` < 2.00;
 
 -- 校验
 SELECT `level`, `level_name`, `max_video_quality`, `max_playback_rate`, `max_concurrent_stream` FROM `vip_config` ORDER BY `level`;
