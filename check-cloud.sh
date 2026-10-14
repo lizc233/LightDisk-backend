@@ -101,14 +101,6 @@ fi
 
 # ---------------------------------------------------------- 5. 后端接口
 hd "5) 后端接口"
-AI_CODE="$(curl -s -o /tmp/ld_ai_status.out -w '%{http_code}' -m 30 "${API}/api/ai/status")"
-AI="$(cat /tmp/ld_ai_status.out 2>/dev/null)"; rm -f /tmp/ld_ai_status.out
-if [ -n "$AI" ]; then
-  ok "GET /api/ai/status → HTTP ${AI_CODE} $(echo "$AI" | cut -c1-96)"
-else
-  no "GET /api/ai/status 无响应（HTTP ${AI_CODE}，已等 30s；该接口首次调用要懒启动 MCP 子进程，慢属正常）"
-fi
-
 LOGIN="$(curl -s -m 10 -X POST "${API}/api/login" -H 'Content-Type: application/json' \
   -d '{"username":"admin","password":"123456"}')"
 echo "    登录返回：$(echo "$LOGIN" | cut -c1-160)"
@@ -116,6 +108,26 @@ case "$LOGIN" in
   *'"code":1'*) ok "管理员登录成功（JWT 签发正常）" ;;
   *) no "管理员登录失败 —— 若 java 不是 8，这就是 jjwt/JAXB 报的「系统繁忙」" ;;
 esac
+
+# /api/ai/status 需要登录（不在 JwtTokenInterceptor 白名单里），必须带 token 才测得准
+TOKEN="$(echo "$LOGIN" | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')"
+if [ -n "$TOKEN" ]; then
+  AI_CODE="$(curl -s -o /tmp/ld_ai_status.out -w '%{http_code}' -m 30 \
+    -H "Authorization: ${TOKEN}" "${API}/api/ai/status")"
+  AI="$(cat /tmp/ld_ai_status.out 2>/dev/null)"; rm -f /tmp/ld_ai_status.out
+  if [ -n "$AI" ]; then
+    ok "GET /api/ai/status（带 token）→ HTTP ${AI_CODE} $(echo "$AI" | cut -c1-96)"
+  else
+    no "GET /api/ai/status（带 token）无响应（HTTP ${AI_CODE}）"
+  fi
+else
+  AI_CODE="$(curl -s -o /dev/null -w '%{http_code}' -m 10 "${API}/api/ai/status")"
+  if [ "$AI_CODE" = "401" ]; then
+    ok "GET /api/ai/status 未带 token 返回 401（该接口需登录，属正常）"
+  else
+    no "GET /api/ai/status 返回 HTTP ${AI_CODE}（未登录时预期 401）"
+  fi
+fi
 
 # ---------------------------------------------------------- 6. 前端
 hd "6) 前端"
