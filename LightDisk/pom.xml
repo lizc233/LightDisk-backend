@@ -105,5 +105,24 @@
 
     </dependencies>
 
+    <build>
+        <!-- 固定产物名，云端 start-lightdisk.sh 依赖 target/lightweight-cloud-disk.jar -->
+        <finalName>lightweight-cloud-disk</finalName>
+        <plugins>
+            <!-- 打成可执行的 Spring Boot fat jar（否则 mvn package 只产出不可运行的瘦 jar） -->
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <excludes>
+                        <exclude>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                        </exclude>
+                    </excludes>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
 
 </project>
