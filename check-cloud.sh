@@ -27,7 +27,8 @@ echo "=========================================================="
 hd "1) 代码版本（是否拉到最新）"
 for d in "$REPO_BACKEND" "$REPO_FRONTEND"; do
   if [ -d "$d/.git" ]; then
-    dirty="$(git -C "$d" status --porcelain 2>/dev/null)"
+    # 过滤掉运行环境必然生成的文件（云端 .env / npm 的 package-lock.json），它们不算「未提交改动」
+    dirty="$(git -C "$d" status --porcelain 2>/dev/null | grep -vE '\.env(\.bak)?$|package-lock\.json$')"
     printf '  %-22s %s\n' "$(basename "$d")" "$(git -C "$d" log --oneline -1 2>/dev/null)"
     printf '  %-22s remote=%s\n' "" "$(git -C "$d" remote get-url origin 2>/dev/null)"
     [ -z "$dirty" ] && ok "工作区干净" || no "有未提交改动：$(echo "$dirty" | head -3 | tr '\n' ' ')"
@@ -59,7 +60,13 @@ fi
 hd "3) 依赖服务"
 for spec in "3306:MySQL" "6379:Redis" "5672:RabbitMQ" "15672:RabbitMQ管理面板" "8080:后端" "5173:前端"; do
   port="${spec%%:*}"; name="${spec#*:}"
-  if ss -ltn 2>/dev/null | grep -q ":${port} "; then ok "${name} 监听 ${port}"; else no "${name} 未监听 ${port}"; fi
+  if ss -ltn 2>/dev/null | grep -q ":${port}[[:space:]]"; then
+    ok "${name} 监听 ${port}"
+  elif curl -s -o /dev/null -m 3 "http://127.0.0.1:${port}/" 2>/dev/null; then
+    ok "${name} 端口 ${port} 可访问（ss 未列出，探测方式差异）"
+  else
+    no "${name} 未监听 ${port}"
+  fi
 done
 if command -v rabbitmqctl >/dev/null 2>&1; then
   echo "  --- RabbitMQ 队列 ---"
