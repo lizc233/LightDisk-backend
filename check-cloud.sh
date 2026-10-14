@@ -75,7 +75,8 @@ if command -v mysql >/dev/null 2>&1; then
     ok "MySQL 连接成功"
     echo "  --- 关键表 ---"
     for t in user storage_file file folder vip_config video_transcode_task play_qoe_log \
-             file_content_version user_avatar notification personal_message announcement; do
+             file_content_version user_avatar \
+             announcement announcement_read personal_message; do
       c=$("${MYSQL[@]}" -N -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='${DB_NAME}' AND table_name='${t}';" 2>/dev/null)
       [ "${c:-0}" = "1" ] && printf '    \033[32m✓\033[0m %s\n' "$t" || printf '    \033[31m✗\033[0m %s （缺！）\n' "$t"
     done
@@ -93,8 +94,13 @@ fi
 
 # ---------------------------------------------------------- 5. 后端接口
 hd "5) 后端接口"
-AI="$(curl -s -m 8 "${API}/api/ai/status")"
-[ -n "$AI" ] && ok "GET /api/ai/status → $(echo "$AI" | cut -c1-110)" || no "GET /api/ai/status 无响应"
+AI_CODE="$(curl -s -o /tmp/ld_ai_status.out -w '%{http_code}' -m 30 "${API}/api/ai/status")"
+AI="$(cat /tmp/ld_ai_status.out 2>/dev/null)"; rm -f /tmp/ld_ai_status.out
+if [ -n "$AI" ]; then
+  ok "GET /api/ai/status → HTTP ${AI_CODE} $(echo "$AI" | cut -c1-96)"
+else
+  no "GET /api/ai/status 无响应（HTTP ${AI_CODE}，已等 30s；该接口首次调用要懒启动 MCP 子进程，慢属正常）"
+fi
 
 LOGIN="$(curl -s -m 10 -X POST "${API}/api/login" -H 'Content-Type: application/json' \
   -d '{"username":"admin","password":"123456"}')"
