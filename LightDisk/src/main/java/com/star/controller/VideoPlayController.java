@@ -86,9 +86,21 @@ public class VideoPlayController {
         Map<String, Object> data = new LinkedHashMap<String, Object>();
         data.put("fileId", fileId);
         data.put("hlsReady", ready);
-        data.put("status", ready ? VideoTranscodeTask.STATUS_DONE : (task == null ? null : task.getStatus()));
-        data.put("progress", ready ? 100 : (task == null ? 0 : task.getProgress()));
-        data.put("message", ready ? "转码完成" : (task == null ? "未提交转码" : task.getMessage()));
+        // 注意不能写成三目：STATUS_DONE 是 int 常量，三元会把表达式提升为 int，
+        // task == null 时的 null 分支拆箱直接 NPE（无转码任务的视频 playback-info 全挂）
+        if (ready) {
+            data.put("status", VideoTranscodeTask.STATUS_DONE);
+            data.put("progress", 100);
+            data.put("message", "转码完成");
+        } else if (task == null) {
+            data.put("status", null);
+            data.put("progress", 0);
+            data.put("message", "未提交转码");
+        } else {
+            data.put("status", task.getStatus());
+            data.put("progress", task.getProgress() == null ? 0 : task.getProgress());
+            data.put("message", task.getMessage());
+        }
         data.put("variants", ready ? videoTranscodeService.listVariants(fileId) : java.util.Collections.emptyList());
         data.put("masterUrl", ready ? "/api/video/" + fileId + "/hls/master.m3u8" : null);
         data.put("fallbackUrl", "/api/file/preview/" + fileId);
