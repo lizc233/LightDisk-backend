@@ -37,6 +37,15 @@ public class FolderController {
         return Result.success(folderService.listAllFolders(userId));
     }
 
+    /** 重命名文件夹（只改 folder 记录，并级联修复子孙物化路径） */
+    @PutMapping("/{folderId}/rename")
+    public Result<String> rename(@PathVariable Long folderId,
+                                 @RequestBody java.util.Map<String, String> body) {
+        Long userId = BaseContext.getCurrentId();
+        String name = body == null ? null : body.get("name");
+        return Result.success(folderService.renameFolder(folderId, name, userId));
+    }
+
     @GetMapping("/{folderId}")
     public Result<Folder> getFolder(@PathVariable Long folderId,
                                     HttpServletRequest request) {

@@ -251,6 +251,90 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements IF
         fileMapper.updateById(userFile);
     }
 
+    /**
+     * 重命名文件。
+     *
+     * <p>关键设计：<b>只改 file.file_name</b>。物理文件按内容寻址（md5 命名）被
+     * storage_file 共享，文件名只是「用户视角的标签」，因此重命名不需要（也不允许）
+     * 触碰磁盘文件 —— 否则会污染其他用户的秒传文件。</p>
+     *
+     * <p>校验：去空白、长度 1–255、禁止路径分隔符与控制字符、同目录下不重名
+     * （含文件夹重名检测，避免与同级文件夹同名造成混淆）。</p>
+     */
+    @Override
+    public String renameFile(Long fileId, String newName, Long userId) {
+        if (fileId == null) {
+            throw new BusinessException("文件 ID 不能为空");
+        }
+        File userFile = fileMapper.selectById(fileId);
+        if (userFile == null || !userFile.getUserId().equals(userId) || userFile.getStatus() != 1) {
+            throw new BusinessException("文件不存在或无权限操作");
+        }
+
+        String name = newName == null ? "" : newName.trim();
+        if (name.isEmpty()) {
+            throw new BusinessException("文件名不能为空");
+        }
+        if (name.length() > 255) {
+            throw new BusinessException("文件名过长（最多 255 个字符）");
+        }
+        if (name.contains("/") || name.contains("\\")) {
+            throw new BusinessException("文件名不能包含路径分隔符");
+        }
+        if (name.equals(".") || name.equals("..")) {
+            throw new BusinessException("文件名非法");
+        }
+        for (int i = 0; i < name.length(); i++) {
+            char c = name.charAt(i);
+            if (c < 32 || c == 127) {
+                throw new BusinessException("文件名不能包含控制字符");
+            }
+        }
+
+        if (name.equals(userFile.getFileName())) {
+            return name;
+        }
+
+        Long folderId = userFile.getFolderId() == null ? 0L : userFile.getFolderId();
+        // 同目录下不允许出现同名文件
+        Long dup = fileMapper.selectCount(new LambdaQueryWrapper<File>()
+                .eq(File::getUserId, userId)
+                .eq(File::getFolderId, folderId)
+                .eq(File::getFileName, name)
+                .eq(File::getStatus, 1)
+                .ne(File::getId, fileId));
+        if (dup != null && dup > 0) {
+            throw new BusinessException("当前文件夹下已存在同名文件");
+        }
+        // 同目录下也不允许与文件夹同名，避免列表出现两个一样的名字
+        Long folderDup = folderMapper.selectCount(new LambdaQueryWrapper<Folder>()
+                .eq(Folder::getUserId, userId)
+                .eq(Folder::getParentId, folderId)
+                .eq(Folder::getFolderName, name)
+                .eq(Folder::getIsDeleted, 0));
+        if (folderDup != null && folderDup > 0) {
+            throw new BusinessException("当前文件夹下已存在同名文件夹");
+        }
+
+        String oldName = userFile.getFileName();
+        userFile.setFileName(name);
+        fileMapper.updateById(userFile);
+
+        operationLogService.record(userId, currentUsername(userId), "文件", "rename",
+                String.format("重命名文件「%s」→「%s」", oldName, name), fileId);
+        return name;
+    }
+
+    /** 取用户名用于操作日志（取不到时降级为空串，不影响主流程） */
+    private String currentUsername(Long userId) {
+        try {
+            User user = userMapper.selectById(userId);
+            return user == null ? "" : user.getUsername();
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
     // ==================== 批量操作：批量下载 / 批量移动 ====================
 
     @Override

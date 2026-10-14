@@ -25,6 +25,7 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -599,15 +600,81 @@ public class VideoTranscodeServiceImpl implements IVideoTranscodeService {
     @Override
     public List<Map<String, Object>> listVariants(Long fileId) {
         VideoTranscodeTask task = getTaskByFileId(fileId);
-        if (task == null || StrUtil.isBlank(task.getVariants())) {
-            return new ArrayList<Map<String, Object>>();
+        if (task != null && !StrUtil.isBlank(task.getVariants())) {
+            try {
+                return objectMapper.readValue(task.getVariants(),
+                        new TypeReference<List<Map<String, Object>>>() { });
+            } catch (IOException e) {
+                // 落库 JSON 损坏时继续走磁盘扫描兜底
+            }
         }
-        try {
-            return objectMapper.readValue(task.getVariants(),
-                    new TypeReference<List<Map<String, Object>>>() { });
+        // 兜底：任务记录缺失 / variants 为空，但磁盘上仍有转码产物时，
+        // 直接扫描 .hls/{fileId}/{height}p/index.m3u8 重建档位清单，
+        // 避免出现「有产物却切不了清晰度」。
+        return scanVariantsFromDisk(fileId);
+    }
+
+    /** 扫描 HLS 产物目录，按 {@code <height>p/index.m3u8} 结构重建档位清单（升序） */
+    private List<Map<String, Object>> scanVariantsFromDisk(Long fileId) {
+        List<Map<String, Object>> result = new ArrayList<Map<String, Object>>();
+        Path outDir = Paths.get(properties.getOutputDir(), String.valueOf(fileId));
+        if (!Files.isDirectory(outDir)) {
+            return result;
+        }
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(outDir)) {
+            List<int[]> found = new ArrayList<int[]>();
+            for (Path dir : stream) {
+                if (!Files.isDirectory(dir)) {
+                    continue;
+                }
+                String name = dir.getFileName().toString();
+                if (!name.endsWith("p")) {
+                    continue;
+                }
+                int height;
+                try {
+                    height = Integer.parseInt(name.substring(0, name.length() - 1));
+                } catch (NumberFormatException e) {
+                    continue;
+                }
+                if (!Files.exists(dir.resolve("index.m3u8"))) {
+                    continue;
+                }
+                found.add(new int[] {height});
+            }
+            found.sort((a, b) -> Integer.compare(a[0], b[0]));
+            for (int[] item : found) {
+                int height = item[0];
+                Map<String, Object> variant = new LinkedHashMap<String, Object>();
+                variant.put("name", height + "p");
+                variant.put("height", height);
+                variant.put("bandwidth", bitrateOf(height) + audioBitrateOf(height));
+                variant.put("playlist", height + "p/index.m3u8");
+                result.add(variant);
+            }
         } catch (IOException e) {
-            return new ArrayList<Map<String, Object>>();
+            log.warn("扫描 HLS 档位失败: fileId={}, err={}", fileId, e.getMessage());
         }
+        return result;
+    }
+
+    /** 按 LADDER 查表得到视频码率（未知档位给一个保守默认值） */
+    private int bitrateOf(int height) {
+        for (int[] step : LADDER) {
+            if (step[0] == height) {
+                return step[1];
+            }
+        }
+        return 1_000_000;
+    }
+
+    private int audioBitrateOf(int height) {
+        for (int[] step : LADDER) {
+            if (step[0] == height) {
+                return step[2];
+            }
+        }
+        return 128_000;
     }
 
     @Override

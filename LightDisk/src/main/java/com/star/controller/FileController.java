@@ -379,6 +379,20 @@ public class FileController {
         return Result.success(null);
     }
 
+    /**
+     * 重命名文件。
+     *
+     * <p>只修改当前用户 file 记录里的 file_name，存储位置与物理文件保持不变
+     * —— 物理文件按 md5 寻址且被多用户共享，改名不能碰磁盘。</p>
+     */
+    @PutMapping("/{fileId}/rename")
+    public Result<String> rename(@PathVariable Long fileId,
+                                 @RequestBody java.util.Map<String, String> body) {
+        Long userId = BaseContext.getCurrentId();
+        String name = body == null ? null : body.get("name");
+        return Result.success(fileService.renameFile(fileId, name, userId));
+    }
+
     @DeleteMapping("/{fileId}/permanent")
     public Result<Void> permanentDelete(@PathVariable Long fileId,
                                         HttpServletRequest request) {

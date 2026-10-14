@@ -28,6 +28,13 @@ public interface IFileService extends IService<File> {
 
     void moveFileToFolder(Long fileId, Long targetFolderId, Long userId);
 
+    /**
+     * 重命名文件（仅修改当前用户的 file 记录，存储位置与物理文件完全不变）。
+     *
+     * @return 规范化后的新文件名
+     */
+    String renameFile(Long fileId, String newName, Long userId);
+
     void deleteFile(Long fileId, Long userId);
 
     void permanentDeleteFile(Long fileId, Long userId);

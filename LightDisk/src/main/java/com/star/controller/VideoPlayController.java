@@ -76,16 +76,19 @@ public class VideoPlayController {
         fileService.resolveStorage(fileId, userId);
 
         VideoTranscodeTask task = videoTranscodeService.getTaskByFileId(fileId);
-        boolean ready = task != null && task.getStatus() != null
-                && task.getStatus() == VideoTranscodeTask.STATUS_DONE
-                && videoTranscodeService.resolveHlsResource(fileId, "master.m3u8") != null;
+        boolean done = task != null && task.getStatus() != null
+                && task.getStatus() == VideoTranscodeTask.STATUS_DONE;
+        // 产物兜底：任务记录可能因清理/重建而缺失，但只要磁盘上已有可用的 master.m3u8
+        // 就应当启用 HLS —— 否则会出现「磁盘有转码产物却只能看原画」的诡异状态。
+        java.io.File masterFile = videoTranscodeService.resolveHlsResource(fileId, "master.m3u8");
+        boolean ready = masterFile != null && (done || task == null);
 
         Map<String, Object> data = new LinkedHashMap<String, Object>();
         data.put("fileId", fileId);
         data.put("hlsReady", ready);
-        data.put("status", task == null ? null : task.getStatus());
-        data.put("progress", task == null ? 0 : task.getProgress());
-        data.put("message", task == null ? "未提交转码" : task.getMessage());
+        data.put("status", ready ? VideoTranscodeTask.STATUS_DONE : (task == null ? null : task.getStatus()));
+        data.put("progress", ready ? 100 : (task == null ? 0 : task.getProgress()));
+        data.put("message", ready ? "转码完成" : (task == null ? "未提交转码" : task.getMessage()));
         data.put("variants", ready ? videoTranscodeService.listVariants(fileId) : java.util.Collections.emptyList());
         data.put("masterUrl", ready ? "/api/video/" + fileId + "/hls/master.m3u8" : null);
         data.put("fallbackUrl", "/api/file/preview/" + fileId);
@@ -156,7 +159,12 @@ public class VideoPlayController {
         }
         String content = new String(Files.readAllBytes(master.toPath()), StandardCharsets.UTF_8);
         // master.m3u8 位于 hls 根目录
-        content = rewritePlaylist(content, fileId, "");
+        hlsToken.set(request.getParameter("token"));
+        try {
+            content = rewritePlaylist(content, fileId, "");
+        } finally {
+            hlsToken.remove();
+        }
 
         response.setStatus(200);
         response.setContentType("application/vnd.apple.mpegurl");
@@ -206,7 +214,12 @@ public class VideoPlayController {
             // 子清单（如 720p.m3u8）内的分片是相对自身目录的，改写时带上目录前缀
             int slash = relative.lastIndexOf('/');
             String dirPrefix = slash >= 0 ? relative.substring(0, slash + 1) : "";
-            content = rewritePlaylist(content, fileId, dirPrefix);
+            hlsToken.set(request.getParameter("token"));
+            try {
+                content = rewritePlaylist(content, fileId, dirPrefix);
+            } finally {
+                hlsToken.remove();
+            }
             response.setStatus(200);
             response.setContentType("application/vnd.apple.mpegurl");
             response.setCharacterEncoding("UTF-8");
@@ -234,6 +247,11 @@ public class VideoPlayController {
      * master.m3u8 里的 {@code 720p.m3u8} 在根目录，而子清单里的 {@code seg_0000.ts}
      * 其实位于 {@code 720p/} 下。若统一按根目录拼接，子清单的分片会 404。</p>
      *
+     * <p>⚠️ 必须把当前请求的 {@code token} 透传到子清单 / 分片地址上：
+     * 浏览器与 hls.js 拉取子 m3u8 和 .ts 分片时不带 Authorization 头，
+     * 只靠 URL 上的 token 鉴权。若改写时丢掉 token，子清单会 401 → HLS 加载失败 →
+     * 播放器回退原画质，表现为「清晰度切不了、倍速时有时无」。</p>
+     *
      * @param dirPrefix m3u8 所在目录相对 hls 根的路径（根目录传空串，子目录传 "720p/"）
      */
     private String rewritePlaylist(String content, Long fileId, String dirPrefix) {
@@ -248,12 +266,25 @@ public class VideoPlayController {
             } else if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
                 sb.append(line);
             } else {
-                sb.append(base).append(trimmed);
+                sb.append(base).append(escapeHlsToken(trimmed));
             }
             if (i < lines.length - 1) {
                 sb.append('\n');
             }
         }
         return sb.toString();
+    }
+
+    /** 当前线程（请求）的 HLS 令牌，用于透传到子清单 / 分片地址 */
+    private final ThreadLocal<String> hlsToken = new ThreadLocal<String>();
+
+    /** 把 token 以查询参数形式附加到子资源路径（HLS 相对路径中一般不带 query） */
+    private String escapeHlsToken(String relativePath) {
+        String token = hlsToken.get();
+        if (token == null || token.isEmpty()) {
+            return relativePath;
+        }
+        String sep = relativePath.indexOf('?') >= 0 ? "&" : "?";
+        return relativePath + sep + "token=" + java.net.URLEncoder.encode(token);
     }
 }

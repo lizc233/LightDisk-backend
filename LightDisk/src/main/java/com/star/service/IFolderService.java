@@ -21,4 +21,11 @@ public interface IFolderService extends IService<Folder> {
     void permanentDeleteFolder(Long folderId, Long userId);
 
     void restoreFolder(Long folderId, Long userId);
+
+    /**
+     * 重命名文件夹（仅改 folder 记录，磁盘上无对应目录，不涉及物理文件）。
+     *
+     * @return 规范化后的新名称
+     */
+    String renameFolder(Long folderId, String newName, Long userId);
 }
