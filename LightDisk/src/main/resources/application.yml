@@ -26,11 +26,14 @@ spring:
         max-wait: -1ms
         min-idle: 0
 
+  # 注意：这里给占位符留了默认值。application-dev.yml（已 gitignore）没配 star.rabbitmq 时，
+  # 旧写法会让 spring.rabbitmq.port 绑定到字面量 "${star.rabbitmq.port}" → NumberFormatException
+  # → 整个 Spring 容器启动失败。默认值保证"没装 RabbitMQ 也能起后端"，只是转码不可用。
   rabbitmq:
-    host: ${star.rabbitmq.host}
-    port: ${star.rabbitmq.port}
-    username: ${star.rabbitmq.username}
-    password: ${star.rabbitmq.password}
+    host: ${star.rabbitmq.host:127.0.0.1}
+    port: ${star.rabbitmq.port:5672}
+    username: ${star.rabbitmq.username:admin}
+    password: ${star.rabbitmq.password:123456}
     virtual-host: /
     listener:
       simple:
