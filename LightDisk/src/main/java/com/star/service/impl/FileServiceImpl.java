@@ -42,13 +42,16 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.text.Collator;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.Date;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
+import java.util.Locale;
 import java.util.Set;
 import java.util.List;
 import java.util.Map;
@@ -654,7 +657,6 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements IF
 
     @Override
     public Page<FileListVO> getFileListAdvanced(FileQueryDTO query, Long userId) {
-        Page<File> pageParam = new Page<>(query.getPageNum(), query.getPageSize());
         Page<FileListVO> resultPage = new Page<>(query.getPageNum(), query.getPageSize());
 
         // 场景 A：全局搜索 (最近使用 或 特定分类) -> 忽略 folderId，只查文件，不查文件夹
@@ -738,8 +740,11 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements IF
                 fileWrapper.in(File::getId, taggedFileIds);
             }
 
-            Page<File> filePage = fileMapper.selectPage(pageParam, fileWrapper);
-            List<FileListVO> voList = filePage.getRecords().stream().map(f -> {
+            // 排序必须先于分页在「全量数据」上完成，否则跨页顺序会错乱：
+            // 按名称升序时 A 明明该排第一，却可能因为落在第 2 页而永远排不到前面。
+            // 所以这里不再让数据库直接分页，而是全量取出 → 排序 → 内存分页。
+            List<File> allFiles = fileMapper.selectList(fileWrapper);
+            List<FileListVO> voList = allFiles.stream().map(f -> {
                 FileListVO vo = new FileListVO();
                 vo.setId(f.getId());
                 vo.setName(f.getFileName());
@@ -748,12 +753,19 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements IF
                 return vo;
             }).collect(Collectors.toList());
             fillSizeAndExt(voList);
-            Map<Long, File> fileMap = filePage.getRecords().stream()
+            Map<Long, File> fileMap = allFiles.stream()
                     .collect(Collectors.toMap(File::getId, f -> f, (a, b) -> a));
             fillFavoriteAndTags(voList, fileMap);
 
-            resultPage.setRecords(voList);
-            resultPage.setTotal(filePage.getTotal());
+            applySort(voList, query.getSortBy(), query.getSortOrder());
+
+            int pageNum = query.getPageNum() == null || query.getPageNum() < 1 ? 1 : query.getPageNum();
+            int pageSize = query.getPageSize() == null || query.getPageSize() < 1 ? 20 : query.getPageSize();
+            int from = Math.min((pageNum - 1) * pageSize, voList.size());
+            int to = Math.min(from + pageSize, voList.size());
+
+            resultPage.setRecords(voList.subList(from, to));
+            resultPage.setTotal(voList.size());
             return resultPage;
         }
 
@@ -797,7 +809,9 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements IF
         fillFavoriteAndTags(voList.stream().filter(v -> !"folder".equals(v.getType())).collect(Collectors.toList()),
                 files.stream().collect(Collectors.toMap(File::getId, f -> f, (a, b) -> a)));
 
-        // 手动分页（列表由文件夹+文件两段拼接，无法在 SQL 层一次分页）
+        // 先全局排序，再手动分页（列表由文件夹+文件两段拼接，无法在 SQL 层一次分页）
+        applySort(voList, query.getSortBy(), query.getSortOrder());
+
         int pageNum = query.getPageNum() == null || query.getPageNum() < 1 ? 1 : query.getPageNum();
         int pageSize = query.getPageSize() == null || query.getPageSize() < 1 ? 20 : query.getPageSize();
         int from = Math.min((pageNum - 1) * pageSize, voList.size());
@@ -806,6 +820,56 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements IF
         resultPage.setRecords(voList.subList(from, to));
         resultPage.setTotal(voList.size());
         return resultPage;
+    }
+
+    /**
+     * 列表全局排序（必须在分页「之前」调用）。
+     *
+     * <p>为什么不能只在当前页排序：分页是后端全量分页，若排序只作用于某一页，
+     * 按名称升序时「A」明明该在第一页第一位，却可能因为落在第 2 页而永远排不到前面，
+     * 表现为「新上传的 C 反而排在前面」。
+     *
+     * <p>规则：
+     * <ul>
+     *   <li>{@code sortBy=name}：按名称排序（中文用 {@link Collator} 的 zh_CN 规则 → 拼音序），
+     *       与前端 pinyin-pro 生成的排序键语义一致</li>
+     *   <li>其它/缺省：按上传时间排序（新上传在前）</li>
+     *   <li>缺省方向：按名称=升序、按时间=倒序</li>
+     *   <li>文件夹恒排在文件之前（与资源管理器一致），排序方向只作用于组内</li>
+     * </ul>
+     */
+    private void applySort(List<FileListVO> voList, String sortBy, String sortOrder) {
+        if (voList == null || voList.size() < 2) {
+            return;
+        }
+        boolean byName = "name".equalsIgnoreCase(sortBy);
+        boolean desc = (sortOrder == null || sortOrder.trim().isEmpty())
+                ? !byName           // 名称默认升序；时间默认倒序（新在上）
+                : "desc".equalsIgnoreCase(sortOrder.trim());
+
+        Comparator<FileListVO> inner;
+        if (byName) {
+            final Collator collator = Collator.getInstance(Locale.CHINA);
+            inner = (a, b) -> {
+                int r = collator.compare(a.getName() == null ? "" : a.getName(),
+                        b.getName() == null ? "" : b.getName());
+                if (r != 0) {
+                    return r;
+                }
+                // 同名时用原始字符串兜底，保证顺序稳定可预期
+                return String.valueOf(a.getName()).compareTo(String.valueOf(b.getName()));
+            };
+        } else {
+            inner = Comparator.comparing(FileListVO::getUpdateTime,
+                    Comparator.nullsFirst(Comparator.naturalOrder()));
+        }
+        if (desc) {
+            inner = inner.reversed();
+        }
+        // 文件夹在前：先按「是否文件夹」分组，再在组内应用排序方向
+        Comparator<FileListVO> folderFirst =
+                Comparator.comparingInt(v -> "folder".equals(v.getType()) ? 0 : 1);
+        voList.sort(folderFirst.thenComparing(inner));
     }
 
     /**

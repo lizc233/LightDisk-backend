@@ -315,12 +315,17 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         VipConfig currentConfig = getVipConfig(user.getRole());
         VipConfig nextConfig = getNextVipConfig(currentConfig.getLevel());
 
+        // 已是最高等级：没有「下一级」可升，直接拒绝。
+        // 这里以前是默默续期 365 天，于是审计日志里会出现「特级用户 → 特级用户」这种
+        // 等级根本没变的记录 —— 每点一次就多一年，看着就像在乱升级。
         if (nextConfig.getLevel().equals(currentConfig.getLevel())) {
-            user.setVipExpireTime(LocalDateTime.now().plusDays(365));
-        } else {
-            user.setRole(nextConfig.getLevel());
-            user.setVipExpireTime(LocalDateTime.now().plusDays(365));
+            throw new BusinessException(String.format(
+                    "您当前已是最高等级（%s），无需升级", currentConfig.getLevelName()));
         }
+
+        // 只升「紧邻的下一级」，等级完全以 vip_config 表为准，不做越级
+        user.setRole(nextConfig.getLevel());
+        user.setVipExpireTime(LocalDateTime.now().plusDays(365));
         user.setUpdatedAt(LocalDateTime.now());
         this.updateById(user);
 
@@ -381,6 +386,8 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         data.put("role", currentConfig.getLevel());
         data.put("isAdmin", defaultInt(user.getIsAdmin(), 0));
         data.put("levelName", currentConfig.getLevelName());
+        // 是否已是最高等级：前端据此隐藏/禁用「提升等级」入口
+        data.put("isMaxLevel", nextConfig.getLevel().equals(currentConfig.getLevel()));
         data.put("usedSpace", defaultLong(user.getUsedSpace()));
         data.put("totalSpace", defaultLong(currentConfig.getMaxSpace()));
         data.put("availableSpace", Math.max(defaultLong(currentConfig.getMaxSpace()) - defaultLong(user.getUsedSpace()), 0L));
