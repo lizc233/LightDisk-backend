@@ -1,6 +1,7 @@
 package com.star.service.impl;
 
 import cn.hutool.crypto.digest.DigestUtil;
+import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
@@ -666,6 +667,11 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements IF
             LambdaQueryWrapper<File> fileWrapper = new LambdaQueryWrapper<>();
             fileWrapper.eq(File::getUserId, userId)
                     .eq(File::getStatus, 1);
+
+            // 0. 关键词检索（AI 文件选择器 / 全局搜索用）：按文件名模糊匹配全盘文件
+            if (StrUtil.isNotBlank(query.getKeyword())) {
+                fileWrapper.like(File::getFileName, query.getKeyword().trim());
+            }
 
             // 1. 如果是“最近使用”，按更新/创建时间倒序
             if (query.getIsRecent() != null && query.getIsRecent()) {

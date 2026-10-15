@@ -18,4 +18,6 @@ public class FileQueryDTO {
     private String sortBy;
     /** 排序方向：asc / desc；缺省时按名称=升序、按时间=倒序 */
     private String sortOrder;
+    /** 文件名关键词（全局搜索场景 A 生效）：非空时按文件名模糊匹配全盘文件 */
+    private String keyword;
 }
