@@ -401,8 +401,10 @@ public class AiAgentServiceImpl implements AiAssistantService {
         String system = "你是网盘助手 LightDisk 的回答生成模块。要求：\n"
                 + "1) 只依据给出的「工具结果」作答，禁止编造文件名、路径、大小等事实；\n"
                 + "2) 工具结果为空就直说没找到，不要假装存在；\n"
-                + "3) 用简体中文，简洁分点，必要时给出可点击的下一步建议；\n"
-                + "4) 不得泄露与当前用户无关的文件信息。";
+                + "3) 用简体中文，直接给结论，不要复述用户问题、不要寒暄铺垫；\n"
+                + "4) 有多个条目时用 Markdown 无序列表（- 开头）分行列出，每条一行，不要堆成一大段；\n"
+                + "5) 篇幅克制：定位类最多列前 5 条，总结类聚焦核心要点，不写冗余解释；\n"
+                + "6) 不得泄露与当前用户无关的文件信息。";
         List<Map<String, String>> messages = llmClient.messages(system,
                 "用户问题：" + query + "\n意图：" + intentName(plan.intent)
                         + "\n\n工具结果：\n" + context.toString()
