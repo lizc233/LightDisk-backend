@@ -660,8 +660,9 @@ public class FileServiceImpl extends ServiceImpl<FileMapper, File> implements IF
     public Page<FileListVO> getFileListAdvanced(FileQueryDTO query, Long userId) {
         Page<FileListVO> resultPage = new Page<>(query.getPageNum(), query.getPageSize());
 
-        // 场景 A：全局搜索 (最近使用 或 特定分类) -> 忽略 folderId，只查文件，不查文件夹
+        // 场景 A：全局搜索 (最近使用 / 特定分类 / 关键词检索) -> 忽略 folderId，只查文件，不查文件夹
         if ((query.getIsRecent() != null && query.getIsRecent()) ||
+                (StrUtil.isNotBlank(query.getKeyword())) ||
                 (query.getCategory() != null && !query.getCategory().equals("all"))) {
 
             LambdaQueryWrapper<File> fileWrapper = new LambdaQueryWrapper<>();
