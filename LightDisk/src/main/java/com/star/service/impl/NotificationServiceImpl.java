@@ -18,6 +18,7 @@ import org.springframework.data.redis.core.Cursor;
 import org.springframework.data.redis.core.HashOperations;
 import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
@@ -74,6 +75,13 @@ public class NotificationServiceImpl implements NotificationService {
     private static final String KEY_UNREAD = "ld:notif:unread:";
     /** 延迟落库队列（LIST，元素形如 "OP|uid|id"） */
     private static final String KEY_PENDING = "ld:notif:pending";
+    /**
+     * 压测对照开关：true 时 getUnreadCount 跳过 Redis 直接查库（默认 false）。
+     * 仅用于「缓存版 vs 查库版」性能对照，可用环境变量 LIGHTDISK_NOTIFICATION_FORCE_DB=true 打开。
+     */
+    @Value("${lightdisk.notification.force-db:false}")
+    private boolean forceDb;
+
     /** 已读去重集合（防止同一消息在一次刷盘窗口内被重复 -1） */
     private static final String KEY_GUARD_MSG = "ld:notif:guard:msg:";
     private static final String KEY_GUARD_ANN = "ld:notif:guard:ann:";
@@ -101,6 +109,11 @@ public class NotificationServiceImpl implements NotificationService {
             return buildUnreadMap(0, 0);
         }
         String key = KEY_UNREAD + userId;
+
+        // 0) 压测对照：强制走数据库路径
+        if (forceDb) {
+            return calculateUnreadFromDB(userId);
+        }
 
         // 1) Redis 优先：命中直接返回，不打数据库
         Map<Object, Object> cached;
