@@ -52,6 +52,23 @@ public class VipPermissionServiceImpl implements IVipPermissionService {
         Integer role = vipConfigMapper.selectRoleByUserId(userId);
         VipConfig config = vipConfigMapper.selectById(role == null ? 0 : role);
         if (config == null) {
+            // 等级缺失（如 vip_config 仍是旧 3 级表、而用户已是 level 3）时，
+            // 不能退回 level 0 —— 那会把高等级用户静默降级成 360p/1x，
+            // 表现为「清晰度全是会员专享、倍速点不动」。改为取库中最高可用等级。
+            List<VipConfig> all = vipConfigMapper.selectList(null);
+            if (all != null && !all.isEmpty()) {
+                VipConfig highest = null;
+                for (VipConfig c : all) {
+                    if (c.getLevel() == null) continue;
+                    if (highest == null || c.getLevel() > highest.getLevel()) highest = c;
+                }
+                if (highest != null) {
+                    log.warn("[VIP] 等级 {} 在 vip_config 中缺失，回退到最高可用等级 {}", role, highest.getLevel());
+                    config = highest;
+                }
+            }
+        }
+        if (config == null) {
             config = vipConfigMapper.selectById(0);
         }
         if (config == null) {
