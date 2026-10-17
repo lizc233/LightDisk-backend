@@ -71,6 +71,9 @@ lightdisk:
   # 可用环境变量 LIGHTDISK_NOTIFICATION_FORCE_DB=true 覆盖，无需改代码。
   notification:
     force-db: false
+    # 未读数：待落库队列刷盘间隔 / 全量对账间隔（毫秒）
+    flush-interval: 2000
+    reconcile-interval: 180000
   mail:
     enabled: false
     from:
@@ -92,10 +95,8 @@ lightdisk:
       command: node
       args:
         - D:/AI_LightDisk/LightDisk/lightdisk-mcp-server/server.js
-  notification:
-    # 未读数：待落库队列刷盘间隔 / 全量对账间隔（毫秒）
-    flush-interval: 2000
-    reconcile-interval: 180000
+
+
 
   # ===== 视频转码（FFmpeg → HLS 多清晰度） =====
   transcode:
